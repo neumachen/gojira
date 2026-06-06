@@ -1,0 +1,35 @@
+{
+  "key": "EXAMPLE-1",
+  "self": "SITE_PLACEHOLDER/rest/api/3/issue/EXAMPLE-1",
+  "names": {
+    "summary": "Summary",
+    "status": "Status",
+    "customfield_10115": "Sprint",
+    "customfield_10116": "Rank",
+    "customfield_10220": "Squad"
+  },
+  "fields": {
+    "summary": "Issue with named custom fields",
+    "status": {"name": "Open"},
+    "issuetype": {"name": "Task"},
+    "assignee": null,
+    "reporter": {"displayName": "Alice Example", "emailAddress": "alice@example.com"},
+    "created": "2026-01-01T00:00:00.000+0000",
+    "updated": "2026-01-01T00:00:00.000+0000",
+    "description": null,
+    "parent": null,
+    "subtasks": [],
+    "issuelinks": [],
+    "remotelinks": [],
+    "customfield_10115": [
+      {
+        "id": 4815,
+        "name": "PLATENG Sprint 57",
+        "state": "closed",
+        "boardId": 73
+      }
+    ],
+    "customfield_10116": "0|i07gzp:",
+    "customfield_10220": null
+  }
+}

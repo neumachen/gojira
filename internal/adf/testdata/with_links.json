@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "type": "doc",
+  "content": [
+    {
+      "type": "paragraph",
+      "content": [
+        {
+          "type": "text",
+          "text": "See EXAMPLE-2",
+          "marks": [
+            {
+              "type": "link",
+              "attrs": { "href": "https://your-site.atlassian.net/browse/EXAMPLE-2" }
+            }
+          ]
+        },
+        { "type": "text", "text": ", " },
+        {
+          "type": "text",
+          "text": "org/repo#42",
+          "marks": [
+            {
+              "type": "link",
+              "attrs": { "href": "https://github.com/org/repo/pull/42" }
+            }
+          ]
+        },
+        { "type": "text", "text": ", and " },
+        {
+          "type": "text",
+          "text": "external doc",
+          "marks": [
+            {
+              "type": "link",
+              "attrs": { "href": "https://example.com/doc" }
+            }
+          ]
+        },
+        { "type": "text", "text": "." }
+      ]
+    }
+  ]
+}

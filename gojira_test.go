@@ -1,0 +1,541 @@
+// Package gojira_test contains end-to-end tests for the public library facade.
+//
+// Each test uses httptest.NewServer to fake the Jira API and t.TempDir() for
+// output. No live network calls are made.
+//
+// Tests cover the five PRD acceptance criteria called out in the Phase 4.1
+// task block:
+//
+//   - AC 1  (classify): Classify wraps classify.Classify correctly.
+//   - AC 2  (single issue render): FetchAndRender returns expected Markdown.
+//   - AC 6  (deduplication): Crawl with A↔B cycle fetches each exactly once.
+//   - AC 9  (permission-denied stub): Crawl with 403 writes a stub.
+//   - AC 10 (skip-if-exists): Crawl skips issues whose index.md already exists.
+package gojira_test
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	gojira "github.com/neumachen/gojira"
+	"github.com/neumachen/gojira/classify"
+	"github.com/neumachen/gojira/client"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// ---------------------------------------------------------------------------
+// Fixture helpers
+// ---------------------------------------------------------------------------
+
+// minimalIssueJSON returns a minimal valid Jira issue JSON for key with no
+// outbound links. The site parameter is used in the "self" URL only.
+func minimalIssueJSON(key, site string) []byte {
+	return []byte(fmt.Sprintf(`{
+  "key": %q,
+  "self": %q,
+  "fields": {
+    "summary": "Summary of %s",
+    "status": {"name": "Open"},
+    "issuetype": {"name": "Task"},
+    "assignee": null,
+    "reporter": {"displayName": "Alice Example", "emailAddress": "alice@example.com"},
+    "created": "2026-01-01T00:00:00.000+0000",
+    "updated": "2026-01-01T00:00:00.000+0000",
+    "description": null,
+    "parent": null,
+    "subtasks": [],
+    "issuelinks": [],
+    "remotelinks": []
+  }
+}`, key, site+"/rest/api/3/issue/"+key, key))
+}
+
+// issueWithLinkJSON returns a Jira issue JSON for key that has an outward
+// issue link to linkedKey.
+func issueWithLinkJSON(key, linkedKey, site string) []byte {
+	return []byte(fmt.Sprintf(`{
+  "key": %q,
+  "self": %q,
+  "fields": {
+    "summary": "Summary of %s",
+    "status": {"name": "Open"},
+    "issuetype": {"name": "Task"},
+    "assignee": null,
+    "reporter": {"displayName": "Alice Example", "emailAddress": "alice@example.com"},
+    "created": "2026-01-01T00:00:00.000+0000",
+    "updated": "2026-01-01T00:00:00.000+0000",
+    "description": null,
+    "parent": null,
+    "subtasks": [],
+    "issuelinks": [
+      {
+        "type": {"name": "Relates", "inward": "relates to", "outward": "relates to"},
+        "outwardIssue": {"key": %q, "fields": {"summary": "Summary of linked"}}
+      }
+    ],
+    "remotelinks": []
+  }
+}`, key, site+"/rest/api/3/issue/"+key, key, linkedKey))
+}
+
+// ---------------------------------------------------------------------------
+// httptest server helpers
+// ---------------------------------------------------------------------------
+
+// issueServer starts an httptest.Server that serves Jira issue JSON.
+// responses maps issue key → raw JSON bytes. A 404 is returned for unknown
+// keys. statusOverrides maps issue key → HTTP status code (e.g. 403).
+func issueServer(t *testing.T, responses map[string][]byte, statusOverrides map[string]int) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Expect paths like /rest/api/3/issue/<KEY>
+		const prefix = "/rest/api/3/issue/"
+		if !strings.HasPrefix(r.URL.Path, prefix) {
+			http.NotFound(w, r)
+			return
+		}
+		key := strings.TrimPrefix(r.URL.Path, prefix)
+		// Strip any trailing path segments.
+		if idx := strings.Index(key, "/"); idx >= 0 {
+			key = key[:idx]
+		}
+
+		if code, ok := statusOverrides[key]; ok {
+			w.WriteHeader(code)
+			return
+		}
+		body, ok := responses[key]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// testConfig builds a gojira.Config pointing at the given httptest server URL
+// and using t.TempDir() as the output directory.
+func testConfig(t *testing.T, siteURL, outputDir string) gojira.Config {
+	t.Helper()
+	cfg, err := gojira.LoadConfig(map[string]string{
+		"GOJIRA_SITE":        siteURL,
+		"GOJIRA_USER":        "test@example.com",
+		"GOJIRA_TOKEN":       "test-token",
+		"GOJIRA_OUTPUT_DIR":  outputDir,
+		"GOJIRA_CONCURRENCY": "1",
+		"GOJIRA_ISSUE_CAP":   "0",
+	})
+	require.NoError(t, err, "testConfig: LoadConfig")
+	return cfg
+}
+
+// noSleepOpt returns a client.Option that replaces the sleep function with a
+// no-op so retry backoffs do not slow down tests.
+func noSleepOpt() client.Option {
+	return client.WithRateLimitBackoff(0, 0)
+}
+
+// ---------------------------------------------------------------------------
+// AC 1 — Classify
+// ---------------------------------------------------------------------------
+
+// TestAC01_Classify verifies that the facade Classify function correctly
+// wraps classify.Classify and returns the expected Kind for all four input
+// shapes defined in PRD AC 1.
+func TestAC01_Classify(t *testing.T) {
+	const site = "https://mycompany.atlassian.net"
+
+	tests := []struct {
+		name     string
+		input    string
+		wantKind classify.Kind
+	}{
+		{
+			name:     "bare Jira issue key",
+			input:    "EXAMPLE-1",
+			wantKind: classify.KindJiraKey,
+		},
+		{
+			name:     "Jira issue URL",
+			input:    "https://mycompany.atlassian.net/browse/EXAMPLE-1",
+			wantKind: classify.KindJiraURL,
+		},
+		{
+			name:     "GitHub pull request URL",
+			input:    "https://github.com/org/repo/pull/42",
+			wantKind: classify.KindGitHubPR,
+		},
+		{
+			name:     "external link",
+			input:    "https://example.com/doc",
+			wantKind: classify.KindExternal,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := gojira.Classify(tt.input, site)
+			assert.Equal(t, tt.wantKind, got.Kind,
+				"Classify(%q, %q).Kind", tt.input, site)
+		})
+	}
+
+	// Verify that the facade result is identical to calling classify.Classify
+	// directly (re-export correctness).
+	for _, tt := range tests {
+		direct := classify.Classify(tt.input, site)
+		facade := gojira.Classify(tt.input, site)
+		assert.Equal(t, direct, facade,
+			"facade result differs from direct classify.Classify for %q", tt.input)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AC 2 — Single issue render
+// ---------------------------------------------------------------------------
+
+// TestAC02_FetchAndRender verifies that FetchAndRender against an httptest
+// server returning a fixture issue produces the expected Markdown content.
+// PRD AC 2: indexMD contains # KEY heading; outboundMD matches reference list.
+func TestAC02_FetchAndRender(t *testing.T) {
+	outputDir := t.TempDir()
+
+	// Build the server first so we know the site URL.
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/rest/api/3/issue/"
+		if !strings.HasPrefix(r.URL.Path, prefix) {
+			http.NotFound(w, r)
+			return
+		}
+		key := strings.TrimPrefix(r.URL.Path, prefix)
+		if idx := strings.Index(key, "/"); idx >= 0 {
+			key = key[:idx]
+		}
+		if key != "EXAMPLE-1" {
+			http.NotFound(w, r)
+			return
+		}
+		body := minimalIssueJSON("EXAMPLE-1", srv.URL)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := testConfig(t, srv.URL, outputDir)
+
+	// Use a custom HTTP client pointing at the test server.
+	hc := srv.Client()
+	ctx := context.Background()
+
+	indexMD, outboundMD, discoveredKeys, err := gojira.FetchAndRender(
+		ctx, cfg, "EXAMPLE-1",
+		client.WithHTTPClient(hc),
+	)
+	require.NoError(t, err, "FetchAndRender")
+
+	// AC 2: indexMD must contain the # KEY — Summary heading.
+	assert.Contains(t, indexMD, "# EXAMPLE-1", "indexMD missing '# EXAMPLE-1' heading")
+	assert.Contains(t, indexMD, "Summary of EXAMPLE-1", "indexMD missing summary text")
+
+	// Metadata section must be present.
+	assert.Contains(t, indexMD, "## Metadata", "indexMD missing '## Metadata' section")
+
+	// Description section must be present.
+	assert.Contains(t, indexMD, "## Description", "indexMD missing '## Description' section")
+
+	// This minimal issue has no outbound Jira links.
+	assert.Empty(t, discoveredKeys, "discoveredKeys should be empty")
+
+	// outboundMD is empty for an issue with no references.
+	assert.Empty(t, outboundMD, "outboundMD should be empty string")
+
+	// FetchAndRender must NOT write to disk.
+	indexPath := filepath.Join(outputDir, "EXAMPLE-1", "index.md")
+	_, err = os.Stat(indexPath)
+	assert.Error(t, err, "FetchAndRender must not write to disk at %s", indexPath)
+}
+
+// TestAC02_FetchAndRender_WithLinks verifies that discoveredKeys is populated
+// when the issue has outbound Jira links.
+func TestAC02_FetchAndRender_WithLinks(t *testing.T) {
+	outputDir := t.TempDir()
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/rest/api/3/issue/"
+		if !strings.HasPrefix(r.URL.Path, prefix) {
+			http.NotFound(w, r)
+			return
+		}
+		key := strings.TrimPrefix(r.URL.Path, prefix)
+		if idx := strings.Index(key, "/"); idx >= 0 {
+			key = key[:idx]
+		}
+		if key != "EXAMPLE-1" {
+			http.NotFound(w, r)
+			return
+		}
+		body := issueWithLinkJSON("EXAMPLE-1", "EXAMPLE-2", srv.URL)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := testConfig(t, srv.URL, outputDir)
+	ctx := context.Background()
+
+	_, _, discoveredKeys, err := gojira.FetchAndRender(
+		ctx, cfg, "EXAMPLE-1",
+		client.WithHTTPClient(srv.Client()),
+	)
+	require.NoError(t, err, "FetchAndRender")
+
+	assert.NotEmpty(t, discoveredKeys, "discoveredKeys must not be empty; expected EXAMPLE-2")
+	assert.Contains(t, discoveredKeys, "EXAMPLE-2", "discoveredKeys must contain EXAMPLE-2")
+}
+
+// ---------------------------------------------------------------------------
+// AC 6 — Deduplication
+// ---------------------------------------------------------------------------
+
+// TestAC06_Deduplication verifies that a two-issue cycle (A↔B) results in
+// exactly two fetches and no infinite loop. PRD AC 6.
+func TestAC06_Deduplication(t *testing.T) {
+	outputDir := t.TempDir()
+
+	var fetchCounts [2]int64 // [0]=EXAMPLE-1, [1]=EXAMPLE-2
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/rest/api/3/issue/"
+		if !strings.HasPrefix(r.URL.Path, prefix) {
+			http.NotFound(w, r)
+			return
+		}
+		key := strings.TrimPrefix(r.URL.Path, prefix)
+		if idx := strings.Index(key, "/"); idx >= 0 {
+			key = key[:idx]
+		}
+
+		var body []byte
+		switch key {
+		case "EXAMPLE-1":
+			atomic.AddInt64(&fetchCounts[0], 1)
+			body = issueWithLinkJSON("EXAMPLE-1", "EXAMPLE-2", srv.URL)
+		case "EXAMPLE-2":
+			atomic.AddInt64(&fetchCounts[1], 1)
+			body = issueWithLinkJSON("EXAMPLE-2", "EXAMPLE-1", srv.URL)
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := testConfig(t, srv.URL, outputDir)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	sum, err := gojira.Crawl(ctx, cfg, []string{"EXAMPLE-1"}, nil)
+	require.NoError(t, err, "Crawl")
+
+	// AC 6: each issue fetched exactly once.
+	assert.Equal(t, 2, sum.Fetched, "Summary.Fetched")
+	assert.Equal(t, int64(1), atomic.LoadInt64(&fetchCounts[0]), "EXAMPLE-1 fetch count")
+	assert.Equal(t, int64(1), atomic.LoadInt64(&fetchCounts[1]), "EXAMPLE-2 fetch count")
+
+	// Both index.md files must exist.
+	for _, key := range []string{"EXAMPLE-1", "EXAMPLE-2"} {
+		p := filepath.Join(outputDir, key, "index.md")
+		_, err := os.Stat(p)
+		assert.NoError(t, err, "index.md must exist for %s", key)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// AC 9 — Permission-denied stub
+// ---------------------------------------------------------------------------
+
+// TestAC09_PermissionDeniedStub verifies that when one issue returns 403,
+// a stub index.md is written and Summary.Stubbed == 1. PRD AC 9.
+func TestAC09_PermissionDeniedStub(t *testing.T) {
+	outputDir := t.TempDir()
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/rest/api/3/issue/"
+		if !strings.HasPrefix(r.URL.Path, prefix) {
+			http.NotFound(w, r)
+			return
+		}
+		key := strings.TrimPrefix(r.URL.Path, prefix)
+		if idx := strings.Index(key, "/"); idx >= 0 {
+			key = key[:idx]
+		}
+
+		switch key {
+		case "EXAMPLE-1":
+			// EXAMPLE-1 links to EXAMPLE-2 which will return 403.
+			body := issueWithLinkJSON("EXAMPLE-1", "EXAMPLE-2", srv.URL)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(body)
+		case "EXAMPLE-2":
+			// 403 — permission denied.
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := testConfig(t, srv.URL, outputDir)
+
+	ctx := context.Background()
+	sum, err := gojira.Crawl(ctx, cfg, []string{"EXAMPLE-1"}, nil)
+	require.NoError(t, err, "Crawl returned unexpected error")
+
+	// AC 9: EXAMPLE-1 fetched, EXAMPLE-2 stubbed.
+	assert.Equal(t, 1, sum.Fetched, "Summary.Fetched")
+	assert.Equal(t, 1, sum.Stubbed, "Summary.Stubbed")
+
+	// Stub file must exist for EXAMPLE-2.
+	stubPath := filepath.Join(outputDir, "EXAMPLE-2", "index.md")
+	content, err := os.ReadFile(stubPath)
+	require.NoError(t, err, "stub index.md must be readable at %s", stubPath)
+
+	// Stub must mention the key and the denial reason.
+	assert.Contains(t, string(content), "EXAMPLE-2", "stub content must contain 'EXAMPLE-2'")
+	assert.Contains(t, string(content), "Permission denied", "stub content must contain 'Permission denied'")
+}
+
+// ---------------------------------------------------------------------------
+// AC 10 — Skip-if-exists
+// ---------------------------------------------------------------------------
+
+// TestAC10_SkipIfExists verifies that when index.md already exists on disk
+// and cfg.Refetch is false, the fetcher is not invoked for that key.
+// PRD AC 10.
+func TestAC10_SkipIfExists(t *testing.T) {
+	outputDir := t.TempDir()
+
+	// Pre-create EXAMPLE-1/index.md.
+	issueDir := filepath.Join(outputDir, "EXAMPLE-1")
+	require.NoError(t, os.MkdirAll(issueDir, 0755), "MkdirAll")
+	existingContent := "# EXAMPLE-1 — pre-existing\n"
+	require.NoError(t, os.WriteFile(filepath.Join(issueDir, "index.md"), []byte(existingContent), 0644), "WriteFile")
+
+	// Count how many times the server is called for EXAMPLE-1.
+	var fetchCount int64
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/rest/api/3/issue/"
+		if !strings.HasPrefix(r.URL.Path, prefix) {
+			http.NotFound(w, r)
+			return
+		}
+		key := strings.TrimPrefix(r.URL.Path, prefix)
+		if idx := strings.Index(key, "/"); idx >= 0 {
+			key = key[:idx]
+		}
+		if key == "EXAMPLE-1" {
+			atomic.AddInt64(&fetchCount, 1)
+		}
+		// Return a valid response anyway (should not be reached for EXAMPLE-1).
+		body := minimalIssueJSON(key, r.Host)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := testConfig(t, srv.URL, outputDir)
+	// Refetch defaults to false — skip-if-exists is active.
+
+	ctx := context.Background()
+	sum, err := gojira.Crawl(ctx, cfg, []string{"EXAMPLE-1"}, nil)
+	require.NoError(t, err, "Crawl")
+
+	// AC 10: EXAMPLE-1 must be skipped, not fetched.
+	assert.Equal(t, 1, sum.Skipped, "Summary.Skipped")
+	assert.Equal(t, 0, sum.Fetched, "Summary.Fetched")
+
+	// The fetcher must not have been called for EXAMPLE-1.
+	assert.Equal(t, int64(0), atomic.LoadInt64(&fetchCount), "server must not be called for EXAMPLE-1")
+
+	// The pre-existing file must not be overwritten.
+	content, err := os.ReadFile(filepath.Join(issueDir, "index.md"))
+	require.NoError(t, err, "ReadFile")
+	assert.Equal(t, existingContent, string(content), "index.md must not be overwritten")
+}
+
+// ---------------------------------------------------------------------------
+// Additional: LoadConfig error path
+// ---------------------------------------------------------------------------
+
+// TestLoadConfig_MissingRequired verifies that LoadConfig returns an error
+// when a required key is absent.
+func TestLoadConfig_MissingRequired(t *testing.T) {
+	_, err := gojira.LoadConfig(map[string]string{
+		// GOJIRA_SITE is intentionally missing.
+		"GOJIRA_USER":       "me@example.com",
+		"GOJIRA_TOKEN":      "tok",
+		"GOJIRA_OUTPUT_DIR": "/tmp/out",
+	})
+	assert.Error(t, err, "LoadConfig: expected error for missing GOJIRA_SITE")
+}
+
+// ---------------------------------------------------------------------------
+// Additional: Crawl with nil sink uses NoopSink (no panic)
+// ---------------------------------------------------------------------------
+
+// TestCrawl_NilSink verifies that passing nil as the sink does not panic.
+func TestCrawl_NilSink(t *testing.T) {
+	outputDir := t.TempDir()
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/rest/api/3/issue/"
+		if !strings.HasPrefix(r.URL.Path, prefix) {
+			http.NotFound(w, r)
+			return
+		}
+		key := strings.TrimPrefix(r.URL.Path, prefix)
+		if idx := strings.Index(key, "/"); idx >= 0 {
+			key = key[:idx]
+		}
+		body := minimalIssueJSON(key, srv.URL)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := testConfig(t, srv.URL, outputDir)
+	ctx := context.Background()
+
+	// nil sink must not panic.
+	sum, err := gojira.Crawl(ctx, cfg, []string{"EXAMPLE-1"}, nil)
+	require.NoError(t, err, "Crawl with nil sink")
+	assert.Equal(t, 1, sum.Fetched, "Summary.Fetched")
+}

@@ -1,0 +1,44 @@
+# Build artifacts
+*.test
+*.out
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test coverage
+*.coverprofile
+coverage.*
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Binaries
+/gojira
+/cmd/gojira/gojira
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*~
+
+# Secrets — never commit credentials or tokens
+.env
+.env.*
+!.env.example
+*.token
+
+# Local-only helper scripts (not committed; per-developer)
+scripts/local/
+
+# Crawl output directories. The default GOJIRA_OUTPUT_DIR for local
+# runs and docker-compose is ./out — those are real Jira issue
+# mirrors with real project content and must never end up in version
+# control. Match any path that looks like a crawl output dir.
+/out/
+out/
+jira-output/
+jira-mirror-output/

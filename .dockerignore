@@ -1,0 +1,61 @@
+# .dockerignore — controls what gets copied into the Docker build context.
+#
+# The build context is sent to the Docker daemon at the start of every
+# `docker build`. Everything listed here is excluded, which keeps the
+# build fast and prevents secrets and local state from leaking into
+# image layers.
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# AiderDesk and project-local agent state — none of this belongs in
+# the image and some of it contains design artifacts not meant to ship.
+.aider*
+.aider-desk/
+.aiderignore
+
+# Local-only developer scripts (commit helpers, etc.).
+scripts/local/
+
+# Secrets and local environment files. Real credentials must never
+# end up in an image layer.
+.env
+.env.*
+!.env.example
+
+# Build artifacts that might exist from a host-side `go build`.
+*.test
+*.out
+*.exe
+*.dll
+*.so
+*.dylib
+*.coverprofile
+coverage.*
+go.work
+go.work.sum
+/gojira
+/cmd/gojira/gojira
+
+# Editor and OS noise.
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*~
+
+# Documentation and project metadata that the binary does not need at
+# runtime. The Dockerfile does not consume any of these.
+docs/
+README.md
+LICENSE
+CHANGELOG.md
+Makefile
+
+# Docker-related files do not need to be copied into the image either.
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
+.dockerignore

@@ -1,0 +1,24 @@
+{
+  "key": "EXAMPLE-1",
+  "self": "SITE_PLACEHOLDER/rest/api/3/issue/EXAMPLE-1",
+  "names": {
+    "summary": "Summary",
+    "status": "Status",
+    "customfield_10000": "Development"
+  },
+  "fields": {
+    "summary": "Issue with Dev Status summary custom field",
+    "status": {"name": "Open"},
+    "issuetype": {"name": "Task"},
+    "assignee": null,
+    "reporter": {"displayName": "Alice Example", "emailAddress": "alice@example.com"},
+    "created": "2026-01-01T00:00:00.000+0000",
+    "updated": "2026-01-01T00:00:00.000+0000",
+    "description": null,
+    "parent": null,
+    "subtasks": [],
+    "issuelinks": [],
+    "remotelinks": [],
+    "customfield_10000": "{repository={count=1, dataType=repository},\njson={\"cachedValue\":{\"errors\":[],\"summary\":{\"repository\":{\"overall\":{\"count\":1,\"dataType\":\"repository\"}}}},\"isStale\":true}}"
+  }
+}

@@ -1,0 +1,760 @@
+package client_test
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/neumachen/gojira/client"
+	"github.com/neumachen/gojira/internal/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// noSleep is a sleepFn that returns immediately, making retry tests fast.
+// It is injected via the unexported withSleepFn option exposed through the
+// package-level helper below.
+func noSleep(_ context.Context, _ time.Duration) error { return nil }
+
+// newTestClient builds a Client pointed at srv with tiny backoffs and
+// no real sleeping, so retry tests complete in milliseconds.
+func newTestClient(t *testing.T, srv *httptest.Server, extraOpts ...client.Option) *client.Client {
+	t.Helper()
+	cfg := config.Config{
+		Site:  srv.URL,
+		User:  "user@example.com",
+		Token: "api-token",
+	}
+	opts := []client.Option{
+		client.WithHTTPClient(srv.Client()),
+		client.WithRateLimitBackoff(time.Millisecond, 10*time.Millisecond),
+		client.WithNetworkBackoff(time.Millisecond, 10*time.Millisecond),
+		clientWithNoSleep(),
+	}
+	opts = append(opts, extraOpts...)
+	c, err := client.New(cfg, opts...)
+	require.NoError(t, err, "client.New")
+	return c
+}
+
+// clientWithNoSleep returns the unexported withSleepFn option via the
+// exported test-helper shim defined in client_export_test.go.
+func clientWithNoSleep() client.Option {
+	return client.WithSleepFnForTest(noSleep)
+}
+
+// --- helpers ---
+
+func expectedAuthHeader() string {
+	creds := "user@example.com:api-token"
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(creds))
+}
+
+// --- tests ---
+
+func TestGetIssue_Success(t *testing.T) {
+	const wantBody = `{"key":"PROJ-1","fields":{}}`
+	var gotAuth, gotUA, gotAccept string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotUA = r.Header.Get("User-Agent")
+		gotAccept = r.Header.Get("Accept")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, wantBody)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	body, err := c.GetIssue(context.Background(), "PROJ-1", nil)
+	require.NoError(t, err)
+	assert.Equal(t, wantBody, string(body), "body")
+	assert.Equal(t, expectedAuthHeader(), gotAuth, "Authorization")
+	assert.Equal(t, "gojira/0.1.0", gotUA, "User-Agent")
+	assert.Equal(t, "application/json", gotAccept, "Accept")
+}
+
+func TestGetIssue_401(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	_, err := c.GetIssue(context.Background(), "PROJ-1", nil)
+	assert.ErrorIs(t, err, client.ErrUnauthorized)
+}
+
+func TestGetIssue_403(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	_, err := c.GetIssue(context.Background(), "PROJ-1", nil)
+	assert.ErrorIs(t, err, client.ErrForbidden)
+}
+
+func TestGetIssue_404(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	_, err := c.GetIssue(context.Background(), "PROJ-1", nil)
+	assert.ErrorIs(t, err, client.ErrNotFound)
+}
+
+func TestGetIssue_429_RetryAfterHeader_EventualSuccess(t *testing.T) {
+	const wantBody = `{"key":"PROJ-1"}`
+	var callCount int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&callCount, 1)
+		if n < 2 {
+			// First call: 429 with a tiny Retry-After.
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		// Second call: success.
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, wantBody)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	body, err := c.GetIssue(context.Background(), "PROJ-1", nil)
+	require.NoError(t, err)
+	assert.Equal(t, wantBody, string(body), "body")
+	assert.Equal(t, int32(2), atomic.LoadInt32(&callCount), "call count")
+}
+
+func TestGetIssue_429_Exhausted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "0")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+
+	// Allow only 2 retries so the test is fast.
+	c := newTestClient(t, srv, client.WithMaxRetries(2))
+	_, err := c.GetIssue(context.Background(), "PROJ-1", nil)
+	assert.ErrorIs(t, err, client.ErrRateLimited)
+}
+
+func TestGetIssue_5xx_ErrorContainsStatusCode(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	_, err := c.GetIssue(context.Background(), "PROJ-1", nil)
+	require.Error(t, err, "expected error")
+	assert.Contains(t, err.Error(), "500", "error should mention status 500")
+}
+
+func TestGetIssue_ContextCancellation(t *testing.T) {
+	// Server that blocks until the test cancels the context.
+	ready := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(ready)
+		// Block until the client disconnects.
+		<-r.Context().Done()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	c := newTestClient(t, srv)
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := c.GetIssue(ctx, "PROJ-1", nil)
+		errCh <- err
+	}()
+
+	// Wait until the server has received the request, then cancel.
+	<-ready
+	cancel()
+
+	err := <-errCh
+	require.Error(t, err, "expected error after context cancellation")
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestNew_InvalidSiteURL(t *testing.T) {
+	cfg := config.Config{
+		Site:  "://not-a-url",
+		User:  "u",
+		Token: "t",
+	}
+	_, err := client.New(cfg)
+	assert.Error(t, err, "expected error for invalid site URL")
+}
+
+func TestNew_EmptySiteURL(t *testing.T) {
+	cfg := config.Config{
+		Site:  "",
+		User:  "u",
+		Token: "t",
+	}
+	_, err := client.New(cfg)
+	assert.Error(t, err, "expected error for empty site URL")
+}
+
+func TestGetIssue_URLPath(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	_, err := c.GetIssue(context.Background(), "PROJ-42", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "/rest/api/3/issue/PROJ-42", gotPath, "path")
+}
+
+// TestGetIssue_WithExpand verifies that passing a non-empty expand
+// slice surfaces as the documented `expand=<csv>` query parameter on
+// the outgoing request, and that passing nil/empty leaves the
+// request URL with no query string (legacy behaviour). The two
+// branches are asserted in one test because they share fixture
+// scaffolding.
+func TestGetIssue_WithExpand(t *testing.T) {
+	var gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+
+	// Single expand token surfaces as `expand=names`.
+	_, err := c.GetIssue(context.Background(), "PROJ-1", []string{"names"})
+	require.NoError(t, err)
+	assert.Equal(t, "/rest/api/3/issue/PROJ-1", gotPath, "path")
+	assert.Equal(t, "expand=names", gotQuery, "expand=names query")
+
+	// Multiple expand tokens are comma-joined verbatim.
+	_, err = c.GetIssue(context.Background(), "PROJ-1", []string{"names", "renderedFields"})
+	require.NoError(t, err)
+	// url.Values.Encode percent-encodes the comma to %2C; the Jira
+	// API accepts both forms, and the encoded form is what
+	// net/url emits.
+	assert.Equal(t, "expand=names%2CrenderedFields", gotQuery, "expand csv query")
+
+	// Empty slice → no expand query parameter at all.
+	_, err = c.GetIssue(context.Background(), "PROJ-1", nil)
+	require.NoError(t, err)
+	assert.Empty(t, gotQuery, "no query when expand is nil")
+}
+
+func TestGetIssue_SiteWithTrailingSlash(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{}`)
+	}))
+	defer srv.Close()
+
+	// Construct client with a trailing slash in the site URL.
+	cfg := config.Config{
+		Site:  srv.URL + "/",
+		User:  "user@example.com",
+		Token: "api-token",
+	}
+	c, err := client.New(cfg,
+		client.WithHTTPClient(srv.Client()),
+		clientWithNoSleep(),
+	)
+	require.NoError(t, err, "client.New")
+
+	_, err = c.GetIssue(context.Background(), "PROJ-1", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "/rest/api/3/issue/PROJ-1", gotPath, "path")
+}
+
+func TestWithRoundTripper(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"key":"PROJ-1"}`)
+	}))
+	defer srv.Close()
+
+	cfg := config.Config{
+		Site:  srv.URL,
+		User:  "u",
+		Token: "t",
+	}
+	// Use WithRoundTripper instead of WithHTTPClient.
+	c, err := client.New(cfg,
+		client.WithRoundTripper(srv.Client().Transport),
+		clientWithNoSleep(),
+	)
+	require.NoError(t, err, "client.New")
+	body, err := c.GetIssue(context.Background(), "PROJ-1", nil)
+	require.NoError(t, err)
+	assert.NotEmpty(t, body, "expected non-empty body")
+}
+
+// ---------------------------------------------------------------------------
+// Search tests
+// ---------------------------------------------------------------------------
+
+func TestSearch_Success(t *testing.T) {
+	var (
+		gotMethod, gotPath, gotCT, gotAccept, gotAuth string
+		gotBody                                       []byte
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		gotCT = r.Header.Get("Content-Type")
+		gotAccept = r.Header.Get("Accept")
+		gotAuth = r.Header.Get("Authorization")
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"issues":[{"key":"EXAMPLE-1"},{"key":"EXAMPLE-2"}],"nextPageToken":""}`)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	res, err := c.Search(context.Background(), `parent = "EXAMPLE-0"`, 50)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.MethodPost, gotMethod, "method")
+	assert.Equal(t, "/rest/api/3/search/jql", gotPath, "path")
+	assert.Equal(t, "application/json", gotCT, "Content-Type")
+	assert.Equal(t, "application/json", gotAccept, "Accept")
+	assert.Equal(t, expectedAuthHeader(), gotAuth, "Authorization")
+
+	var sent map[string]any
+	require.NoError(t, json.Unmarshal(gotBody, &sent), "request body must be JSON")
+	assert.Equal(t, `parent = "EXAMPLE-0"`, sent["jql"], "request jql")
+	assert.Equal(t, float64(50), sent["maxResults"], "request maxResults")
+	assert.Equal(t, []any{"key"}, sent["fields"], "request fields")
+
+	assert.Equal(t, []string{"EXAMPLE-1", "EXAMPLE-2"}, res.Keys, "result keys")
+	assert.Empty(t, res.NextPageToken, "no next page expected")
+}
+
+func TestSearch_OmitMaxResultsWhenZero(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"issues":[]}`)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	_, err := c.Search(context.Background(), `parent = "X"`, 0)
+	require.NoError(t, err)
+
+	var sent map[string]any
+	require.NoError(t, json.Unmarshal(gotBody, &sent), "request body must be JSON")
+	_, present := sent["maxResults"]
+	assert.False(t, present, "maxResults must be omitted when <= 0")
+}
+
+func TestSearch_Empty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"issues":[]}`)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	res, err := c.Search(context.Background(), `parent = "Y"`, 10)
+	require.NoError(t, err)
+	assert.Empty(t, res.Keys)
+}
+
+func TestSearch_NextPageToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"issues":[{"key":"A-1"}],"nextPageToken":"tok-2"}`)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	res, err := c.Search(context.Background(), "", 1)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"A-1"}, res.Keys)
+	assert.Equal(t, "tok-2", res.NextPageToken)
+}
+
+func TestSearch_401(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	_, err := c.Search(context.Background(), `parent = "X"`, 10)
+	assert.ErrorIs(t, err, client.ErrUnauthorized)
+}
+
+func TestSearch_429_RetryAndSucceed(t *testing.T) {
+	var callCount int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&callCount, 1)
+		if n < 2 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{"issues":[{"key":"OK-1"}]}`)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	res, err := c.Search(context.Background(), `parent = "X"`, 10)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"OK-1"}, res.Keys)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&callCount))
+}
+
+// ---------------------------------------------------------------------------
+// ListFields tests
+// ---------------------------------------------------------------------------
+
+func TestListFields_Success(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `[
+  {"id":"summary","key":"summary","name":"Summary","custom":false},
+  {"id":"customfield_10014","key":"customfield_10014","name":"Epic Link","custom":true}
+]`)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	fields, err := c.ListFields(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "/rest/api/3/field", gotPath)
+	require.Len(t, fields, 2)
+	assert.Equal(t, "summary", fields[0].ID)
+	assert.False(t, fields[0].Custom)
+	assert.Equal(t, "customfield_10014", fields[1].ID)
+	assert.Equal(t, "Epic Link", fields[1].Name)
+	assert.True(t, fields[1].Custom)
+}
+
+func TestListFields_401(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	_, err := c.ListFields(context.Background())
+	assert.ErrorIs(t, err, client.ErrUnauthorized)
+}
+
+// ---------------------------------------------------------------------------
+// DevStatus tests
+// ---------------------------------------------------------------------------
+
+// devStatusBody is the canonical Dev Status response shape captured from
+// a real Atlassian tenant (instinctvet.atlassian.net, PLATENG-1573).
+const devStatusBody = `{
+  "errors": [],
+  "detail": [
+    {
+      "_instance": {
+        "id": "com.github.integration.production",
+        "type": "GitHub",
+        "singleInstance": true,
+        "baseUrl": "https://github.com",
+        "typeName": "GitHub",
+        "name": "GitHub"
+      },
+      "branches": [],
+      "pullRequests": [
+        {
+          "id": "#557",
+          "url": "https://github.com/org/repo/pull/557",
+          "name": "PLATENG-1573: Implement feature",
+          "status": "MERGED",
+          "lastUpdate": "2026-05-08T13:44:52.000+0000",
+          "source": {
+            "branch": "feature/PLATENG-1573",
+            "url": "https://github.com/org/repo/tree/feature%2FPLATENG-1573"
+          },
+          "destination": {
+            "branch": "main",
+            "url": "https://github.com/org/repo/tree/main"
+          },
+          "author": {
+            "name": "Robert Tirserio",
+            "avatar": "https://example.com/avatar.png"
+          },
+          "reviewers": [
+            {"name": "Kareem Hepburn", "avatar": "x", "approved": true}
+          ],
+          "repositoryUrl": "https://github.com/org/repo",
+          "repositoryName": "org/repo",
+          "repositoryId": "abc",
+          "commentCount": 0
+        }
+      ],
+      "repositories": []
+    }
+  ]
+}`
+
+func TestDevStatus_Success(t *testing.T) {
+	var gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, devStatusBody)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	resp, err := c.DevStatus(context.Background(), "86679", "GitHub", "pullrequest")
+	require.NoError(t, err)
+
+	assert.Equal(t, "/rest/dev-status/1.0/issue/detail", gotPath)
+	// Query parameter order is deterministic (url.Values.Encode sorts keys).
+	assert.Contains(t, gotQuery, "issueId=86679")
+	assert.Contains(t, gotQuery, "applicationType=GitHub")
+	assert.Contains(t, gotQuery, "dataType=pullrequest")
+
+	require.Len(t, resp.Detail, 1)
+	require.Len(t, resp.Detail[0].PullRequests, 1)
+	pr := resp.Detail[0].PullRequests[0]
+	assert.Equal(t, "#557", pr.ID)
+	assert.Equal(t, "https://github.com/org/repo/pull/557", pr.URL)
+	assert.Equal(t, "PLATENG-1573: Implement feature", pr.Name)
+	assert.Equal(t, "MERGED", pr.Status)
+	assert.Equal(t, "org/repo", pr.Repository)
+	assert.Equal(t, "main", pr.Destination.Branch)
+	assert.Equal(t, "Robert Tirserio", pr.Author.Name)
+	require.Len(t, pr.Reviewers, 1)
+	assert.True(t, pr.Reviewers[0].Approved)
+}
+
+func TestDevStatus_401(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	_, err := c.DevStatus(context.Background(), "86679", "GitHub", "pullrequest")
+	assert.ErrorIs(t, err, client.ErrUnauthorized)
+}
+
+func TestDevStatus_429RetryThenSucceed(t *testing.T) {
+	var callCount atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := callCount.Add(1)
+		if n == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, devStatusBody)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	resp, err := c.DevStatus(context.Background(), "86679", "GitHub", "pullrequest")
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), callCount.Load(), "retry then success")
+	require.Len(t, resp.Detail, 1)
+}
+
+// devStatusMultiEntityBody is a synthetic Dev Status response that
+// populates branches, commits, repositories, and builds in addition to
+// pull requests. It is a single response body used by
+// TestDevStatus_UnmarshalsAllEntityTypes; in production each dataType
+// query returns its own response with only the matching list populated.
+const devStatusMultiEntityBody = `{
+  "errors": [],
+  "detail": [
+    {
+      "_instance": {"type": "GitHub", "name": "GitHub", "baseUrl": "https://github.com"},
+      "pullRequests": [],
+      "branches": [
+        {
+          "name": "feature/PLATENG-1578",
+          "url": "https://github.com/org/api/tree/feature%2FPLATENG-1578",
+          "createPullRequestUrl": "https://github.com/org/api/pull/new/feature%2FPLATENG-1578",
+          "repository": {"name": "org/api", "url": "https://github.com/org/api"},
+          "lastCommit": {
+            "id": "abc123def456",
+            "displayId": "abc123d",
+            "url": "https://github.com/org/api/commit/abc123",
+            "message": "feat: initial commit",
+            "author": {"name": "Kareem Hepburn"},
+            "authorTimestamp": "2026-06-02T14:30:00.000+0000"
+          }
+        }
+      ],
+      "commits": [
+        {
+          "id": "abc123def456",
+          "displayId": "abc123d",
+          "url": "https://github.com/org/api/commit/abc123",
+          "message": "feat: add OIDC initiate endpoint\nDetailed body line.",
+          "author": {"name": "Kareem Hepburn"},
+          "authorTimestamp": "2026-06-02T14:30:00.000+0000",
+          "fileCount": 3,
+          "merge": false,
+          "repository": {"name": "org/api", "url": "https://github.com/org/api"}
+        }
+      ],
+      "repositories": [
+        {"name": "org/api", "url": "https://github.com/org/api", "avatar": "https://example.com/a.png"}
+      ],
+      "builds": [
+        {
+          "id": "42",
+          "buildNumber": 42,
+          "name": "Build #42",
+          "description": "Pipelines build",
+          "url": "https://bitbucket.org/org/api/pipelines/results/42",
+          "state": "SUCCESSFUL",
+          "lastUpdated": "2026-06-02T14:30:00.000+0000",
+          "testSummary": {"totalNumber": 100, "passedNumber": 100, "failedNumber": 0, "skippedNumber": 0},
+          "references": [{"name": "feature/PLATENG-1578", "uri": "refs/heads/feature/PLATENG-1578"}]
+        }
+      ]
+    }
+  ]
+}`
+
+// TestDevStatus_UnmarshalsAllEntityTypes verifies that DevStatusResponse
+// tolerantly unmarshals every dataType-specific entity list. In
+// production each dataType query returns its own response with a single
+// non-empty list; this test asserts the struct can carry every shape
+// without a separate Response type per dataType.
+func TestDevStatus_UnmarshalsAllEntityTypes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, devStatusMultiEntityBody)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	resp, err := c.DevStatus(context.Background(), "86679", "GitHub", "branch")
+	require.NoError(t, err)
+	require.Len(t, resp.Detail, 1)
+	inst := resp.Detail[0]
+
+	require.Len(t, inst.Branches, 1, "branches populated")
+	assert.Equal(t, "feature/PLATENG-1578", inst.Branches[0].Name)
+	assert.Equal(t, "org/api", inst.Branches[0].Repository.Name)
+	assert.Equal(t, "abc123d", inst.Branches[0].LastCommit.DisplayID)
+
+	require.Len(t, inst.Commits, 1, "commits populated")
+	assert.Equal(t, "abc123def456", inst.Commits[0].ID)
+	assert.Equal(t, 3, inst.Commits[0].FileCount)
+	assert.Equal(t, "org/api", inst.Commits[0].Repository.Name)
+
+	require.Len(t, inst.Repositories, 1, "repositories populated")
+	assert.Equal(t, "org/api", inst.Repositories[0].Name)
+	assert.Equal(t, "https://github.com/org/api", inst.Repositories[0].URL)
+
+	require.Len(t, inst.Builds, 1, "builds populated")
+	assert.Equal(t, "SUCCESSFUL", inst.Builds[0].State)
+	require.NotNil(t, inst.Builds[0].TestSummary, "test summary present")
+	assert.Equal(t, 100, inst.Builds[0].TestSummary.PassedNumber)
+	require.Len(t, inst.Builds[0].References, 1)
+	assert.Equal(t, "refs/heads/feature/PLATENG-1578", inst.Builds[0].References[0].URI)
+}
+
+// devStatusObjectErrorsBody is the PLATENG-1417 regression fixture.
+// The Dev Status endpoint returned HTTP 200 with object-shaped entries
+// in the "errors" array instead of the empty array seen on
+// PLATENG-1573. Prior to the fix that retyped DevStatusResponse.Errors
+// to []json.RawMessage this body caused json.Unmarshal to fail with:
+//
+//	json: cannot unmarshal object into Go struct field
+//	DevStatusResponse.errors of type string
+//
+// The Detail array is intentionally non-empty so the test also proves
+// the rest of the response is still consumed when "errors" carries
+// shape we do not interpret.
+const devStatusObjectErrorsBody = `{
+  "errors": [
+    {"code": 1, "message": "GitHub instance is unreachable", "userId": "u-1"},
+    {"code": 2, "message": "rate limited", "userId": "u-2"}
+  ],
+  "detail": [
+    {
+      "_instance": {"type": "GitHub", "name": "GitHub", "baseUrl": "https://github.com"},
+      "pullRequests": [],
+      "branches": [],
+      "commits": [],
+      "repositories": [],
+      "builds": []
+    }
+  ]
+}`
+
+// TestDevStatus_ObjectErrorsDoNotCrashUnmarshal is the PLATENG-1417
+// regression test. A Dev Status response carrying JSON-object error
+// entries (rather than the empty array seen on PLATENG-1573 or the
+// historical string entries) must decode cleanly into
+// DevStatusResponse without crashing the unmarshal, because callers
+// rely on the rest of the response (Detail) to still be available even
+// when one upstream integration emits soft errors.
+func TestDevStatus_ObjectErrorsDoNotCrashUnmarshal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, devStatusObjectErrorsBody)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+	resp, err := c.DevStatus(context.Background(), "86679", "GitHub", "commit")
+	require.NoError(t, err, "object-shaped errors entries must not crash the unmarshal")
+
+	// Errors slice carries opaque entries; we do not interpret them
+	// here, only verify they round-tripped without losing data.
+	require.Len(t, resp.Errors, 2, "both error entries preserved as raw JSON")
+	// The exact whitespace inside each RawMessage mirrors the input body
+	// (json.RawMessage is byte-identical to the source); the source has
+	// spaces after colons, so match accordingly.
+	assert.Contains(t, string(resp.Errors[0]), `"code": 1`, "first entry payload preserved")
+	assert.Contains(t, string(resp.Errors[1]), `"rate limited"`, "second entry message preserved")
+
+	// Detail is still consumed normally.
+	require.Len(t, resp.Detail, 1)
+	assert.Equal(t, "GitHub", resp.Detail[0].Instance.Type)
+}

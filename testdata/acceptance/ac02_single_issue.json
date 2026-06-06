@@ -1,0 +1,27 @@
+{
+  "key": "EXAMPLE-1",
+  "self": "SITE_PLACEHOLDER/rest/api/3/issue/EXAMPLE-1",
+  "fields": {
+    "summary": "Acceptance test single issue",
+    "status": {"name": "Open"},
+    "issuetype": {"name": "Task"},
+    "assignee": {"displayName": "Alice Example", "emailAddress": "alice@example.com"},
+    "reporter": {"displayName": "Bob Example", "emailAddress": "bob@example.com"},
+    "created": "2026-01-01T00:00:00.000+0000",
+    "updated": "2026-01-02T00:00:00.000+0000",
+    "description": {
+      "version": 1,
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [{"type": "text", "text": "This is the acceptance test description."}]
+        }
+      ]
+    },
+    "parent": null,
+    "subtasks": [],
+    "issuelinks": [],
+    "remotelinks": []
+  }
+}

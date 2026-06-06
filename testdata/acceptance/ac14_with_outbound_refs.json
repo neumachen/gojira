@@ -1,0 +1,39 @@
+{
+  "key": "EXAMPLE-1",
+  "self": "SITE_PLACEHOLDER/rest/api/3/issue/EXAMPLE-1",
+  "fields": {
+    "summary": "Issue with outbound references",
+    "status": {"name": "Open"},
+    "issuetype": {"name": "Task"},
+    "assignee": null,
+    "reporter": {"displayName": "Alice Example", "emailAddress": "alice@example.com"},
+    "created": "2026-01-01T00:00:00.000+0000",
+    "updated": "2026-01-01T00:00:00.000+0000",
+    "description": null,
+    "parent": null,
+    "subtasks": [],
+    "issuelinks": [
+      {
+        "type": {"name": "Relates", "inward": "relates to", "outward": "relates to"},
+        "outwardIssue": {
+          "key": "EXAMPLE-2",
+          "fields": {"summary": "Related issue"}
+        }
+      }
+    ],
+    "remotelinks": [
+      {
+        "object": {
+          "title": "org/repo#42",
+          "url": "https://github.com/org/repo/pull/42"
+        }
+      },
+      {
+        "object": {
+          "title": "External doc",
+          "url": "https://example.com/doc"
+        }
+      }
+    ]
+  }
+}

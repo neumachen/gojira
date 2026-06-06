@@ -1,0 +1,106 @@
+{
+  "key": "EXAMPLE-1",
+  "self": "https://example.atlassian.net/rest/api/3/issue/10001",
+  "fields": {
+    "summary": "Implement the login flow",
+    "status": {
+      "name": "In Progress"
+    },
+    "issuetype": {
+      "name": "Story"
+    },
+    "assignee": {
+      "displayName": "Alice Example",
+      "emailAddress": "alice@example.com"
+    },
+    "reporter": {
+      "displayName": "Bob Example",
+      "emailAddress": "bob@example.com"
+    },
+    "created": "2026-01-15T10:30:00.000+0000",
+    "updated": "2026-01-20T14:45:00.000+0000",
+    "description": {
+      "version": 1,
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "This story covers the login flow implementation."
+            }
+          ]
+        }
+      ]
+    },
+    "parent": {
+      "key": "EXAMPLE-0",
+      "fields": {
+        "summary": "Authentication epic"
+      }
+    },
+    "subtasks": [
+      {
+        "key": "EXAMPLE-1a",
+        "fields": {
+          "summary": "Write unit tests for login"
+        }
+      },
+      {
+        "key": "EXAMPLE-1b",
+        "fields": {
+          "summary": "Write integration tests for login"
+        }
+      }
+    ],
+    "issuelinks": [
+      {
+        "type": {
+          "name": "Blocks",
+          "inward": "is blocked by",
+          "outward": "blocks"
+        },
+        "outwardIssue": {
+          "key": "EXAMPLE-2",
+          "fields": {
+            "summary": "Implement the logout flow"
+          }
+        }
+      },
+      {
+        "type": {
+          "name": "Relates",
+          "inward": "relates to",
+          "outward": "relates to"
+        },
+        "inwardIssue": {
+          "key": "EXAMPLE-3",
+          "fields": {
+            "summary": "Session management"
+          }
+        }
+      }
+    ],
+    "remotelinks": [
+      {
+        "object": {
+          "title": "Design document",
+          "url": "https://example.com/design-doc"
+        }
+      },
+      {
+        "object": {
+          "title": "PR: add login endpoint",
+          "url": "https://github.com/example-org/example-repo/pull/42"
+        }
+      }
+    ],
+    "customfield_10014": "EXAMPLE-0",
+    "customfield_10016": 5,
+    "customfield_10020": {
+      "name": "Sprint 3",
+      "state": "active"
+    }
+  }
+}

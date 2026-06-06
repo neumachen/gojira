@@ -1,0 +1,125 @@
+# docker-compose.yml — convenience tooling for running gojira in a
+# containerized environment.
+#
+# gojira is a one-shot CLI: it runs to completion and exits. That makes
+# `docker compose up` a poor fit (it expects long-running services) and
+# `docker compose run --rm` the right primitive. The services defined
+# here are designed to be invoked via `run`, not `up`.
+#
+# # Required setup
+#
+#   1. Copy .env.example to .env and fill in your Jira credentials.
+#      Docker Compose reads .env automatically when invoked from this
+#      directory.
+#
+#   2. Create a host directory for the Markdown output:
+#        mkdir -p ./out
+#
+# # Common invocations
+#
+#   # Crawl one issue, output appears in ./out on the host
+#   docker compose run --rm gojira crawl EXAMPLE-1
+#
+#   # Crawl with a flag override
+#   docker compose run --rm gojira crawl --log-format json EXAMPLE-1
+#
+#   # Show help
+#   docker compose run --rm gojira --help
+#
+#   # Build (or rebuild) the image manually
+#   docker compose build gojira
+#
+#   # Interactive shell for debugging (uses the runtime stage, so the
+#   # full Alpine shell is available)
+#   docker compose run --rm --entrypoint sh gojira-shell
+
+# Docker Compose schema version 3.8 has been the practical default
+# since 2020 and is supported by every current docker compose binary.
+# Compose v2 ignores the version line, but older v1 installations
+# still parse it, so keeping it documents intent.
+
+services:
+
+  # ------------------------------------------------------------------
+  # Primary service: the gojira CLI.
+  # ------------------------------------------------------------------
+  gojira:
+    # build.context is the project root so the Dockerfile can see
+    # go.mod and the source tree. The .dockerignore controls what
+    # actually ships into the build context.
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Override at build time via `docker compose build
+        # --build-arg GOJIRA_VERSION=v0.1.0`.
+        GOJIRA_VERSION: ${GOJIRA_VERSION:-dev}
+    image: gojira:${GOJIRA_VERSION:-dev}
+
+    # Read the .env file in this directory. The 12 GOJIRA_* keys from
+    # .env.example are loaded into the container's environment, and
+    # the binary's envext-driven config parser picks them up
+    # transparently. Flags on the CLI still override env vars,
+    # matching the precedence documented in PRD §6.
+    env_file:
+      - .env
+
+    # Mount the host's ./out directory to the container's /output
+    # (the default GOJIRA_OUTPUT_DIR). Without this volume the
+    # Markdown tree would be written to a layer inside the container
+    # and lost on exit.
+    volumes:
+      - ./out:/output
+
+    # gojira is one-shot. Never restart.
+    restart: "no"
+
+    # Security posture: drop every Linux capability the container
+    # could acquire, mark the root filesystem read-only, and apply
+    # the default seccomp profile (Docker's default already applies,
+    # but stating it documents intent and survives a future Docker
+    # config drift).
+    cap_drop:
+      - ALL
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+
+    # The binary needs /tmp for nothing in particular today, but
+    # readonly root means Go's runtime cannot create temp files
+    # without a writable mount. Tmpfs keeps it ephemeral and capped.
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+  # ------------------------------------------------------------------
+  # Debug service: same image, interactive shell entrypoint.
+  # ------------------------------------------------------------------
+  #
+  # When gojira misbehaves and you want to poke around inside the
+  # container, this service runs the same image with sh as the
+  # entrypoint. Use:
+  #
+  #     docker compose run --rm gojira-shell
+  #
+  # Or to bypass the shell:
+  #
+  #     docker compose run --rm --entrypoint /usr/local/bin/gojira \
+  #         gojira-shell --version
+  #
+  # The shell sees the same env vars and volume mount as the primary
+  # service, so reproducing a crawl problem with strace, env, etc. is
+  # straightforward.
+  gojira-shell:
+    image: gojira:${GOJIRA_VERSION:-dev}
+    entrypoint: ["sh"]
+    env_file:
+      - .env
+    volumes:
+      - ./out:/output
+    restart: "no"
+    # Same security posture as the primary service, but writable root
+    # is permitted here because debug sessions often need to install
+    # tools (apk add curl, etc.). If you want a strict debug profile
+    # too, copy the cap_drop / read_only / tmpfs block from above.
+    stdin_open: true
+    tty: true

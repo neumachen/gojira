@@ -119,6 +119,19 @@ var (
 	// ErrRateLimited is returned when Jira responds with 429 and all
 	// retry attempts are exhausted.
 	ErrRateLimited = client.ErrRateLimited
+
+	// ErrConfigMissingRequired is returned (wrapped) by [LoadConfig] /
+	// [LoadAppConfig] when a required configuration value is absent.
+	// It is a re-export of the internal config sentinel so callers can
+	// errors.Is without importing the internal package.
+	ErrConfigMissingRequired = config.ErrMissingRequired
+
+	// ErrConfigInvalidValue is returned (wrapped) by [LoadConfig] /
+	// [LoadAppConfig] when a configuration value fails validation
+	// (bad URL, unknown enum, malformed integer, etc.). It is a
+	// re-export of the internal config sentinel so callers can
+	// errors.Is without importing the internal package.
+	ErrConfigInvalidValue = config.ErrInvalidValue
 )
 
 // ---------------------------------------------------------------------------
@@ -171,10 +184,78 @@ func Classify(input, jiraSite string) classify.Result {
 // itself.
 //
 // On the first validation failure, LoadConfig returns a zero Config and a
-// descriptive error. Use errors.Is with config.ErrMissingRequired or
-// config.ErrInvalidValue to distinguish failure classes.
+// descriptive error. Use errors.Is with [ErrConfigMissingRequired] or
+// [ErrConfigInvalidValue] to distinguish failure classes.
+//
+// LoadConfig is the legacy entry point preserved for backward compatibility
+// with library consumers and the existing CLI flag-overlay pattern. New
+// callers SHOULD prefer [LoadAppConfig], which loads through the full
+// cascade (embedded defaults < YAML file < GOJIRA_ environment variables)
+// and supports config-file discovery.
 func LoadConfig(kv map[string]string) (Config, error) {
 	return config.Build(kv)
+}
+
+// LoadFileConfig runs ONLY the YAML-file layer of the configuration
+// cascade (embedded defaults + optional config file, with Layer-1 schema
+// validation) and returns the flattened [Config]. It does NOT read
+// environment variables and does NOT run the Layer-2 semantic validator,
+// so a partial/missing-required configuration is NOT an error here. An
+// explicit configPath pointing at a non-existent file IS a hard error
+// wrapping [ErrConfigInvalidValue].
+//
+// LoadFileConfig is the seam the CLI uses when it wants to overlay
+// environment variables and flag values on top of the file's
+// contribution using its own validation path: the CLI calls
+// LoadFileConfig, flattens the result onto a kv map, merges env and
+// flag values, and runs the merged map through [LoadConfig]. This
+// preserves the v0.1 *ConfigError error messages downstream tests and
+// users depend on while still honoring the YAML file's contribution
+// to the cascade.
+//
+// When configPath is empty, the standard discovery chain runs (see the
+// LoadAppConfig docstring).
+func LoadFileConfig(configPath string) (Config, error) {
+	app, err := config.LoadFileLayer(configPath, nil)
+	if err != nil {
+		return Config{}, err
+	}
+	return app.ToConfig(), nil
+}
+
+// LoadAppConfig loads configuration through the full app-level cascade and
+// returns a flattened [Config] ready for [Crawl] / [FetchAndRender]. The
+// cascade order, lowest-to-highest precedence, is:
+//
+//  1. Embedded defaults (per-entity DefaultX constructors).
+//  2. YAML config file: when configPath is non-empty, that file is opened;
+//     when empty, the discovery chain runs (--config-equivalent: explicit
+//     path → $GOJIRA_CONFIG_FILE → ./gojira.yaml →
+//     $XDG_CONFIG_HOME/gojira/config.yaml → ~/.config/gojira/config.yaml).
+//     An explicit but non-existent configPath is a hard error.
+//  3. GOJIRA_-prefixed environment variables from env (the caller supplies
+//     this map; the CLI passes a filtered snapshot of os.Environ, while
+//     library consumers may inject any map). Deprecated v0.1 flat keys
+//     (GOJIRA_SITE, GOJIRA_USER, GOJIRA_TOKEN, etc.) continue to work via
+//     internal alias resolution.
+//
+// CLI-flag overrides, if any, are the caller's responsibility to apply
+// to the returned Config. Keeping flags out of LoadAppConfig keeps this
+// package free of CLI-library dependencies.
+//
+// On failure LoadAppConfig returns a zero Config and a descriptive error.
+// Use errors.Is with [ErrConfigMissingRequired] or [ErrConfigInvalidValue]
+// to distinguish failure classes — the exact same sentinels [LoadConfig]
+// uses.
+func LoadAppConfig(configPath string, env map[string]string) (Config, error) {
+	app, err := config.LoadApp(config.LoadOptions{
+		ConfigPath: configPath,
+		Env:        env,
+	})
+	if err != nil {
+		return Config{}, err
+	}
+	return app.ToConfig(), nil
 }
 
 // ---------------------------------------------------------------------------

@@ -503,6 +503,103 @@ func TestLoadConfig_MissingRequired(t *testing.T) {
 		"GOJIRA_OUTPUT_DIR": "/tmp/out",
 	})
 	assert.Error(t, err, "LoadConfig: expected error for missing GOJIRA_SITE")
+	assert.ErrorIs(t, err, gojira.ErrConfigMissingRequired,
+		"LoadConfig must wrap the re-exported ErrConfigMissingRequired sentinel")
+}
+
+// ---------------------------------------------------------------------------
+// Additional: LoadAppConfig — Phase 5 cascade entry point
+// ---------------------------------------------------------------------------
+
+// TestLoadAppConfig_CanonicalEnvEquivalentToLegacy asserts the new
+// cascade entry point produces a Config equivalent to the legacy
+// LoadConfig path when the inputs match. This pins the contract that
+// LoadAppConfig is a drop-in upgrade rather than a behavior change.
+func TestLoadAppConfig_CanonicalEnvEquivalentToLegacy(t *testing.T) {
+	// Canonical Phase 0 env keys.
+	env := map[string]string{
+		"GOJIRA_JIRA_BASE_URL":   "https://example.atlassian.net",
+		"GOJIRA_JIRA_EMAIL":      "me@example.com",
+		"GOJIRA_JIRA_API_TOKEN":  "tok-123",
+		"GOJIRA_OUTPUT_DIR":      "/tmp/out",
+		"GOJIRA_CRAWL_ISSUE_CAP": "200",
+		"GOJIRA_LOG_LEVEL":       "debug",
+	}
+	got, err := gojira.LoadAppConfig("", env)
+	require.NoError(t, err)
+
+	// Equivalent legacy invocation uses the v0.1 flat keys.
+	legacy, err := gojira.LoadConfig(map[string]string{
+		"GOJIRA_SITE":       "https://example.atlassian.net",
+		"GOJIRA_USER":       "me@example.com",
+		"GOJIRA_TOKEN":      "tok-123",
+		"GOJIRA_OUTPUT_DIR": "/tmp/out",
+		"GOJIRA_ISSUE_CAP":  "200",
+		"GOJIRA_LOG_LEVEL":  "debug",
+	})
+	require.NoError(t, err)
+
+	// Field-by-field equivalence on the user-facing values.
+	assert.Equal(t, legacy.Site, got.Site)
+	assert.Equal(t, legacy.User, got.User)
+	assert.Equal(t, legacy.Token, got.Token)
+	assert.Equal(t, legacy.OutputDir, got.OutputDir)
+	assert.Equal(t, legacy.IssueCap, got.IssueCap)
+	assert.Equal(t, legacy.LogLevel, got.LogLevel)
+}
+
+// TestLoadAppConfig_DeprecatedAliasesWork asserts that supplying the
+// v0.1 flat keys to the new cascade still loads a valid Config. This
+// is the back-compat path the CLI relies on so existing shell
+// configurations (GOJIRA_SITE / GOJIRA_USER / GOJIRA_TOKEN) keep
+// working unchanged after the Phase 5 refactor.
+func TestLoadAppConfig_DeprecatedAliasesWork(t *testing.T) {
+	env := map[string]string{
+		"GOJIRA_SITE":       "https://alias.atlassian.net",
+		"GOJIRA_USER":       "alias@example.com",
+		"GOJIRA_TOKEN":      "alias-tok",
+		"GOJIRA_OUTPUT_DIR": "/tmp/aliased",
+	}
+	cfg, err := gojira.LoadAppConfig("", env)
+	require.NoError(t, err)
+	assert.Equal(t, "https://alias.atlassian.net", cfg.Site)
+	assert.Equal(t, "alias@example.com", cfg.User)
+	assert.Equal(t, "alias-tok", cfg.Token)
+	assert.Equal(t, "/tmp/aliased", cfg.OutputDir)
+}
+
+// TestLoadAppConfig_MissingRequired asserts the cascade returns an
+// error wrapping the re-exported ErrConfigMissingRequired sentinel
+// when no input layer supplies a required field. This is the
+// contract callers depend on for exit-code mapping.
+func TestLoadAppConfig_MissingRequired(t *testing.T) {
+	_, err := gojira.LoadAppConfig("", map[string]string{
+		// No Jira credentials.
+		"GOJIRA_OUTPUT_DIR": "/tmp/out",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gojira.ErrConfigMissingRequired,
+		"missing Jira creds must wrap the re-exported ErrConfigMissingRequired")
+}
+
+// TestLoadAppConfig_ExplicitButMissingConfigPathIsHardError asserts
+// that an explicit configPath pointing at a non-existent file is a
+// hard error wrapping the re-exported ErrConfigInvalidValue. This
+// distinguishes "the user asked for that specific file and it's
+// missing" (loud failure) from "no file was discovered" (fall
+// through to env + defaults).
+func TestLoadAppConfig_ExplicitButMissingConfigPathIsHardError(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist.yaml")
+	_, err := gojira.LoadAppConfig(missing, map[string]string{
+		"GOJIRA_JIRA_BASE_URL":  "https://x.atlassian.net",
+		"GOJIRA_JIRA_EMAIL":     "x@example.com",
+		"GOJIRA_JIRA_API_TOKEN": "tok",
+		"GOJIRA_OUTPUT_DIR":     "/tmp/x",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gojira.ErrConfigInvalidValue,
+		"explicit-but-missing config path must wrap ErrConfigInvalidValue")
+	assert.Contains(t, err.Error(), missing)
 }
 
 // ---------------------------------------------------------------------------

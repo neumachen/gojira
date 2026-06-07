@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=./internal/config/config.schema.json
+#
+# gojira.example.yaml — annotated reference for the gojira configuration file.
+#
+# Copy this to one of the discovered locations:
+#   ./gojira.yaml                         (per-project)
+#   $XDG_CONFIG_HOME/gojira/config.yaml
+#   ~/.config/gojira/config.yaml          (XDG fallback)
+#
+# Or point at it explicitly with `--config <path>` (highest-precedence
+# discovery candidate) or the GOJIRA_CONFIG_FILE env var.
+#
+# Cascade precedence (low → high):
+#   embedded defaults < this YAML file < GOJIRA_ environment variables < CLI flags
+#
+# Every field is OPTIONAL except `schema` and the Jira credentials + output
+# directory required to actually contact Jira and write Markdown. Anything you
+# omit keeps its embedded default; values are validated against
+# `internal/config/config.schema.json` (draft 2020-12) before the cascade
+# continues, so a typo here fails fast with a precise error.
+
+# Schema identifier; pinned per release of gojira. Required.
+schema: gojira.config.v1
+
+# ---------------------------------------------------------------------------
+# Jira Cloud connection. All three fields are required to actually crawl;
+# leave api_token empty here and supply it via GOJIRA_JIRA_API_TOKEN to keep
+# the secret out of version control.
+# ---------------------------------------------------------------------------
+jira:
+  base_url: https://example.atlassian.net
+  email: me@example.com
+  api_token: ""   # supply via GOJIRA_JIRA_API_TOKEN — DO NOT commit secrets
+
+# ---------------------------------------------------------------------------
+# Output directory: the root under which `<KEY>/index.md` and
+# `<KEY>/references/outbound.md` are written.
+# ---------------------------------------------------------------------------
+output:
+  dir: ./jira-mirror
+
+# ---------------------------------------------------------------------------
+# Crawl tuning. The defaults below mirror the embedded constants — listed
+# here for discoverability; you can delete any block you don't want to
+# override.
+# ---------------------------------------------------------------------------
+crawl:
+  depth_limit: 0                # 0 = unlimited depth from the seed key
+  issue_cap: 500                # safety cap on issues fetched per run
+  time_cap_seconds: 0           # 0 = no wall-clock cap
+  concurrency: 3                # concurrent Jira API requests
+  refetch: false                # re-fetch issues already on disk
+  include_comments: false       # comments fetched but not rendered in v0.1
+  include_children: true        # discover hierarchy via JQL parent search
+  child_search_limit: 100       # max children per parent
+  epic_link_field: ""           # auto-detect when empty
+  include_dev_status: true      # query Jira Dev Status API for PR metadata
+  dev_status_applications:
+    - GitHub                    # add Bitbucket / GitLab / GitHubEnterprise as needed
+  dev_status_data_types:
+    - pullrequest
+    - branch
+    - commit
+    - repository
+    - build
+  render_null_custom_fields: false
+
+# ---------------------------------------------------------------------------
+# Logging.
+# ---------------------------------------------------------------------------
+log:
+  level: info                   # one of: error, warn, info, debug
+  format: text                  # one of: text, json

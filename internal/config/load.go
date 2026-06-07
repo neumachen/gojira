@@ -157,6 +157,71 @@ func LoadAppFromEnv(env map[string]string) (App, error) {
 	return LoadApp(LoadOptions{Env: env})
 }
 
+// LoadFileLayer runs only the file layer of the cascade and returns
+// the resulting App. It does NOT apply the env layer or the Layer-2
+// semantic validator, so a partial/missing-required configuration
+// does NOT error out here. Layer-1 schema validation against the
+// embedded JSON Schema still runs so a malformed file is caught at
+// load time.
+//
+// LoadFileLayer is the seam the CLI uses when it wants to overlay
+// env and flag values on top of the file's contribution using its
+// own legacy validation path: the CLI calls LoadFileLayer, flattens
+// the result, merges env + flag overrides, and runs the merged map
+// through [Build]. This preserves the v0.1 *ConfigError error
+// messages downstream tests and users depend on while still
+// honoring the YAML file's contribution to the cascade.
+//
+// When configPath is empty, the resolver discovers the file (see
+// [XDGResolver.DiscoverConfigFile]). When configPath is non-empty
+// but the file is absent, LoadFileLayer returns an error wrapping
+// [ErrInvalidValue]. When no file is discovered (no explicit path
+// and no implicit candidate exists), LoadFileLayer returns
+// [DefaultApp] and no error.
+func LoadFileLayer(configPath string, resolver *XDGResolver) (App, error) {
+	opts := LoadOptions{
+		ConfigPath: configPath,
+		Resolver:   resolver,
+	}
+	app := DefaultApp()
+
+	yamlReader, discoveredPath, err := resolveYAMLReader(opts)
+	if err != nil {
+		return App{}, err
+	}
+	if yamlReader == nil {
+		return app, nil
+	}
+	defer func() {
+		if closer, ok := yamlReader.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}()
+
+	buf, err := io.ReadAll(yamlReader)
+	if err != nil {
+		return App{}, errext.WrapPrefix(err, "config: read YAML", 0)
+	}
+	if len(bytes.TrimSpace(buf)) == 0 {
+		return app, nil
+	}
+
+	rawMap, err := decodeYAMLToMap(bytes.NewReader(buf))
+	if err != nil {
+		return App{}, err
+	}
+	if err := ValidateRawConfig(rawMap); err != nil {
+		return App{}, err
+	}
+	if err := decodeYAML(bytes.NewReader(buf), &app); err != nil {
+		return App{}, err
+	}
+	if app.ConfigFile == "" && discoveredPath != "" {
+		app.ConfigFile = discoveredPath
+	}
+	return app, nil
+}
+
 // resolveYAMLReader picks the YAML source for [LoadApp]: either the
 // caller-supplied opts.YAML reader (which wins outright and skips
 // discovery) or an [os.File] opened by the [XDGResolver] from a

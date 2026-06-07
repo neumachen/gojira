@@ -61,6 +61,7 @@ import (
 	"time"
 
 	gojira "github.com/neumachen/gojira"
+	"github.com/neumachen/gojira/internal/config"
 	"github.com/neumachen/gojira/log"
 	cli "github.com/urfave/cli/v3"
 )
@@ -95,30 +96,61 @@ func envMap() map[string]string {
 	return m
 }
 
-// allEnvKeys returns every GOJIRA_* env key the CLI understands. Single
-// source of truth so envMap and the value-source plumbing stay in sync.
+// allEnvKeys returns every GOJIRA_* env key the CLI consults. The union
+// covers the legacy v0.1 flat keys (the Sources chain of each crawl flag
+// reads them directly so the existing CLI behavior is preserved), the
+// canonical Phase 0 keys (so the LoadAppConfig cascade sees them when the
+// user has migrated their environment), and the new GOJIRA_CONFIG_FILE
+// override. Deprecated aliases are sourced from
+// [config.DeprecatedAliasKeys] so the table stays in sync if a new alias
+// is added later.
 func allEnvKeys() []string {
-	return []string{
-		"GOJIRA_SITE",
-		"GOJIRA_USER",
-		"GOJIRA_TOKEN",
+	// Canonical Phase 0 + GOJIRA_CONFIG_FILE.
+	canonical := []string{
+		"GOJIRA_CONFIG_FILE",
 		"GOJIRA_OUTPUT_DIR",
-		"GOJIRA_DEPTH_LIMIT",
-		"GOJIRA_ISSUE_CAP",
-		"GOJIRA_TIME_CAP_SECONDS",
-		"GOJIRA_CONCURRENCY",
-		"GOJIRA_REFETCH",
-		"GOJIRA_INCLUDE_COMMENTS",
 		"GOJIRA_LOG_LEVEL",
 		"GOJIRA_LOG_FORMAT",
-		"GOJIRA_INCLUDE_CHILDREN",
-		"GOJIRA_CHILD_SEARCH_LIMIT",
-		"GOJIRA_EPIC_LINK_FIELD",
-		"GOJIRA_INCLUDE_DEV_STATUS",
-		"GOJIRA_DEV_STATUS_APPLICATIONS",
-		"GOJIRA_DEV_STATUS_DATA_TYPES",
-		"GOJIRA_RENDER_NULL_CUSTOM_FIELDS",
+		"GOJIRA_JIRA_BASE_URL",
+		"GOJIRA_JIRA_EMAIL",
+		"GOJIRA_JIRA_API_TOKEN",
+		"GOJIRA_CRAWL_DEPTH_LIMIT",
+		"GOJIRA_CRAWL_ISSUE_CAP",
+		"GOJIRA_CRAWL_TIME_CAP_SECONDS",
+		"GOJIRA_CRAWL_CONCURRENCY",
+		"GOJIRA_CRAWL_REFETCH",
+		"GOJIRA_CRAWL_INCLUDE_COMMENTS",
+		"GOJIRA_CRAWL_INCLUDE_CHILDREN",
+		"GOJIRA_CRAWL_CHILD_SEARCH_LIMIT",
+		"GOJIRA_CRAWL_EPIC_LINK_FIELD",
+		"GOJIRA_CRAWL_INCLUDE_DEV_STATUS",
+		"GOJIRA_CRAWL_DEV_STATUS_APPLICATIONS",
+		"GOJIRA_CRAWL_DEV_STATUS_DATA_TYPES",
+		"GOJIRA_CRAWL_RENDER_NULL_CUSTOM_FIELDS",
 	}
+	// Deprecated v0.1 flat aliases — sourced from the config package
+	// so the table is the single source of truth.
+	aliases := config.DeprecatedAliasKeys()
+
+	// Deduplicate (canonical and alias sets are disjoint, but be
+	// defensive against a future overlap).
+	seen := make(map[string]struct{}, len(canonical)+len(aliases))
+	out := make([]string, 0, len(canonical)+len(aliases))
+	for _, k := range canonical {
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
+	}
+	for _, k := range aliases {
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -346,6 +378,11 @@ func crawlFlags(env map[string]string) []cli.Flag {
 	}
 	return []cli.Flag{
 		&cli.StringFlag{
+			Name:    "config",
+			Usage:   "Path to YAML config file (overrides discovery)",
+			Sources: src("GOJIRA_CONFIG_FILE"),
+		},
+		&cli.StringFlag{
 			Name:    "site",
 			Usage:   "Jira Cloud base URL",
 			Sources: src("GOJIRA_SITE"),
@@ -470,14 +507,55 @@ func runCrawl(ctx context.Context, cmd *cli.Command, env map[string]string, sign
 	}
 	issueKey := positional[0]
 
-	// Build the config kv map. Anything cli.Command reports as set
-	// (either by flag or via the env-map value source) gets recorded
-	// under its canonical GOJIRA_* key. This collapses the legacy
-	// flag.Visit overlay into a single declarative pass.
-	kv := buildConfigKV(cmd)
+	// Phase 5 cascade. Configuration is built in three steps so the
+	// documented precedence (file < env < flag) is preserved while
+	// validation continues to flow through the single canonical
+	// LoadConfig pass — guaranteeing the legacy *ConfigError surface
+	// and the existing user-facing error messages (e.g. "GOJIRA_SITE
+	// is required") are unchanged.
+	//
+	//  1) Run the app-level cascade (embedded defaults < YAML file)
+	//     via the loader package. Env parsing and the Layer-2
+	//     validator are NOT run here — env is handled below in the
+	//     legacy LoadConfig pass, and validation belongs there too
+	//     so error messages match the v0.1 surface that downstream
+	//     tests and users depend on.
+	//
+	//  2) Flatten the file-layer Config to a kv map, then overlay
+	//     the env layer and the flag-or-env-source layer in
+	//     precedence order: alias-resolved env values land first,
+	//     then user-typed CLI flags (cli's hasBeenSet semantics
+	//     ensure flag values dominate env-source values at the
+	//     buildConfigKV layer).
+	//
+	//  3) Run gojira.LoadConfig on the merged kv map. This is the
+	//     single validation pass: URL parseability, enums, integers,
+	//     and required-field errors all surface here through the
+	//     existing *ConfigError surface.
+	configPath := cmd.String("config")
+	fileCfg, err := gojira.LoadFileConfig(configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return &exitErr{code: 1, msg: "config", wrap: err}
+	}
 
-	// Load and validate configuration.
-	cfg, err := gojira.LoadConfig(kv)
+	mergedKV := configToKV(fileCfg)
+	// Env layer (alias-resolved so legacy GOJIRA_SITE-style keys
+	// continue to populate the canonical Phase 0 names in the
+	// merged map).
+	for k, v := range config.ResolveAliases(env) {
+		if v != "" {
+			mergedKV[k] = v
+		}
+	}
+	// Flag-or-env-source layer (urfave/cli's IsSet returns true for
+	// either input). User-typed flags win over env-source values at
+	// this layer due to cli's hasBeenSet semantics.
+	for k, v := range buildConfigKV(cmd) {
+		mergedKV[k] = v
+	}
+
+	cfg, err := gojira.LoadConfig(mergedKV)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return &exitErr{code: 1, msg: "config", wrap: err}
@@ -511,6 +589,44 @@ func runCrawl(ctx context.Context, cmd *cli.Command, env map[string]string, sign
 
 	// Map crawl outcome to an exit code via *exitErr.
 	return mapCrawlOutcome(stderr, summary, crawlErr, ctx, signalled)
+}
+
+// configToKV flattens a [gojira.Config] back to the canonical legacy
+// GOJIRA_* kv map [gojira.LoadConfig] expects. It is the inverse of
+// [gojira.LoadConfig] for the fields used by the CLI. The CLI uses it
+// to feed the file+env result of the Phase 5 cascade into LoadConfig's
+// single validation pass after overlaying any user-typed flag values.
+// Keeping the conversion centralized here avoids drift between the new
+// cascade's field names and the legacy GOJIRA_* keys downstream of the
+// envext parser.
+func configToKV(cfg gojira.Config) map[string]string {
+	bool01 := func(b bool) string {
+		if b {
+			return "true"
+		}
+		return "false"
+	}
+	return map[string]string{
+		"GOJIRA_SITE":                      cfg.Site,
+		"GOJIRA_USER":                      cfg.User,
+		"GOJIRA_TOKEN":                     cfg.Token,
+		"GOJIRA_OUTPUT_DIR":                cfg.OutputDir,
+		"GOJIRA_DEPTH_LIMIT":               fmt.Sprintf("%d", cfg.DepthLimit),
+		"GOJIRA_ISSUE_CAP":                 fmt.Sprintf("%d", cfg.IssueCap),
+		"GOJIRA_TIME_CAP_SECONDS":          fmt.Sprintf("%d", cfg.TimeCapSeconds),
+		"GOJIRA_CONCURRENCY":               fmt.Sprintf("%d", cfg.Concurrency),
+		"GOJIRA_REFETCH":                   bool01(cfg.Refetch),
+		"GOJIRA_INCLUDE_COMMENTS":          bool01(cfg.IncludeComments),
+		"GOJIRA_LOG_LEVEL":                 cfg.LogLevel,
+		"GOJIRA_LOG_FORMAT":                cfg.LogFormat,
+		"GOJIRA_INCLUDE_CHILDREN":          bool01(cfg.IncludeChildren),
+		"GOJIRA_CHILD_SEARCH_LIMIT":        fmt.Sprintf("%d", cfg.ChildSearchLimit),
+		"GOJIRA_EPIC_LINK_FIELD":           cfg.EpicLinkField,
+		"GOJIRA_INCLUDE_DEV_STATUS":        bool01(cfg.IncludeDevStatus),
+		"GOJIRA_DEV_STATUS_APPLICATIONS":   strings.Join(cfg.DevStatusApplications, ","),
+		"GOJIRA_DEV_STATUS_DATA_TYPES":     strings.Join(cfg.DevStatusDataTypes, ","),
+		"GOJIRA_RENDER_NULL_CUSTOM_FIELDS": bool01(cfg.RenderNullCustomFields),
+	}
 }
 
 // buildConfigKV collapses cmd's per-flag state into the canonical

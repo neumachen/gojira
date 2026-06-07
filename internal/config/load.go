@@ -5,14 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/neumachen/envext"
 	"github.com/neumachen/errext"
 	"gopkg.in/yaml.v3"
 )
 
-// LoadOptions controls the inputs to [LoadApp]. Both fields are
-// optional: an empty value means "no input at that layer", and the
+// LoadOptions controls the inputs to [LoadApp]. Every field is
+// optional: a zero value means "no input at that layer", and the
 // cascade falls through to the next layer (or to the embedded
 // defaults).
 //
@@ -21,11 +22,31 @@ import (
 // onto the returned [App] (Phase 5). Keeping flags out of the loader
 // keeps internal/config free of cli-package dependencies.
 type LoadOptions struct {
-	// YAML is the (optional) contents of a resolved gojira.yaml
-	// file. The reader is consumed once; callers that need to
-	// retain the bytes should buffer them externally. A nil
-	// reader means "no file layer was supplied".
+	// YAML is the (optional) raw contents of a resolved
+	// gojira.yaml file. When non-nil it OVERRIDES the file
+	// discovery path entirely: the resolver is not consulted,
+	// ConfigPath is ignored, and the supplied reader is the
+	// file layer. This shape lets programmatic callers (tests,
+	// embedded services) feed an in-memory document without
+	// depending on filesystem state. A nil reader means "fall
+	// through to discovery". The reader is consumed once;
+	// callers that need to retain the bytes should buffer them
+	// externally.
 	YAML io.Reader
+
+	// ConfigPath is the (optional) explicit --config flag value
+	// the CLI plumbs through to discovery. When non-empty and the
+	// file does not exist, [LoadApp] treats it as a hard error
+	// (the user explicitly asked for that file). Ignored entirely
+	// when YAML is non-nil.
+	ConfigPath string
+
+	// Resolver is the (optional) [XDGResolver] used to perform
+	// config-file discovery. When nil, [NewDefaultXDGResolver] is
+	// used. Ignored entirely when YAML is non-nil. Tests inject
+	// a resolver bound to t.TempDir() to drive discovery
+	// deterministically without touching the real environment.
+	Resolver *XDGResolver
 
 	// Env is the (optional) environment-variable map collected
 	// by the caller (typically a snapshot of os.Environ filtered
@@ -67,8 +88,23 @@ type LoadOptions struct {
 func LoadApp(opts LoadOptions) (App, error) {
 	app := DefaultApp()
 
-	if opts.YAML != nil {
-		buf, err := io.ReadAll(opts.YAML)
+	yamlReader, discoveredPath, err := resolveYAMLReader(opts)
+	if err != nil {
+		return App{}, err
+	}
+	if yamlReader != nil {
+		defer func() {
+			// Close errors on a read-only file handle that we
+			// have already fully consumed are not actionable;
+			// surface them through the loader's own error path
+			// if they happen. The rules require checking every
+			// error explicitly, hence the defer-with-anon-fn.
+			if closer, ok := yamlReader.(io.Closer); ok {
+				_ = closer.Close()
+			}
+		}()
+
+		buf, err := io.ReadAll(yamlReader)
 		if err != nil {
 			return App{}, errext.WrapPrefix(err, "config: read YAML", 0)
 		}
@@ -83,6 +119,12 @@ func LoadApp(opts LoadOptions) (App, error) {
 			if err := decodeYAML(bytes.NewReader(buf), &app); err != nil {
 				return App{}, err
 			}
+		}
+		// Backfill ConfigFile when discovery (not the caller-
+		// supplied reader) located the file; programmatic callers
+		// who pass YAML directly leave ConfigFile empty.
+		if app.ConfigFile == "" && discoveredPath != "" {
+			app.ConfigFile = discoveredPath
 		}
 	}
 
@@ -113,6 +155,59 @@ func LoadApp(opts LoadOptions) (App, error) {
 // "parse the process environment" call site reads naturally.
 func LoadAppFromEnv(env map[string]string) (App, error) {
 	return LoadApp(LoadOptions{Env: env})
+}
+
+// resolveYAMLReader picks the YAML source for [LoadApp]: either the
+// caller-supplied opts.YAML reader (which wins outright and skips
+// discovery) or an [os.File] opened by the [XDGResolver] from a
+// discovered path. The second return value is the path that was
+// discovered (empty when the caller supplied YAML directly or when
+// no file was found), which [LoadApp] backfills onto App.ConfigFile
+// for diagnostics.
+//
+// The "explicit but missing" branch is the only branch that
+// produces a hard error here: an opts.ConfigPath that points at a
+// non-existent file is treated as a misconfiguration the user must
+// see. An empty opts.ConfigPath with no file discovered anywhere is
+// a successful fall-through (the loader proceeds with defaults +
+// env only).
+func resolveYAMLReader(opts LoadOptions) (io.Reader, string, error) {
+	// Programmatic override path: a non-nil reader bypasses
+	// discovery entirely so Phase 3 callers (tests, embedded
+	// services) keep their exact behavior.
+	if opts.YAML != nil {
+		return opts.YAML, "", nil
+	}
+
+	resolver := opts.Resolver
+	if resolver == nil {
+		resolver = NewDefaultXDGResolver()
+	}
+
+	path, found := resolver.DiscoverConfigFile(opts.ConfigPath)
+	switch {
+	case found:
+		// Open returns *os.File which implements io.ReadCloser.
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, "", errext.WrapPrefix(err,
+				"config: open discovered config file "+path, 0)
+		}
+		return f, path, nil
+	case path != "":
+		// Discovery returned a non-empty path with found=false:
+		// the user explicitly asked for opts.ConfigPath or set
+		// GOJIRA_CONFIG_FILE, but the file does not exist. This
+		// is a hard error, wrapping ErrInvalidValue so existing
+		// errors.Is callers still classify it correctly.
+		return nil, "", fmt.Errorf(
+			"%w: requested config file does not exist: %s",
+			ErrInvalidValue, path)
+	default:
+		// Nothing requested, nothing found: fall through to the
+		// defaults+env layers. No error.
+		return nil, "", nil
+	}
 }
 
 // decodeYAML decodes a YAML document from r into into, layering on

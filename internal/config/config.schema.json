@@ -4,26 +4,38 @@
   "title": "gojira Configuration",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema"],
+  "required": [
+    "schema"
+  ],
   "properties": {
     "schema": {
       "type": "string",
-      "enum": ["gojira.config.v1"]
+      "enum": [
+        "gojira.config.v1"
+      ]
     },
     "jira": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "base_url": { "type": "string" },
-        "email": { "type": "string" },
-        "api_token": { "type": "string" }
+        "base_url": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "api_token": {
+          "type": "string"
+        }
       }
     },
     "output": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "dir": { "type": "string" }
+        "dir": {
+          "type": "string"
+        }
       }
     },
     "log": {
@@ -32,12 +44,20 @@
       "properties": {
         "level": {
           "type": "string",
-          "enum": ["error", "warn", "info", "debug"],
+          "enum": [
+            "error",
+            "warn",
+            "info",
+            "debug"
+          ],
           "default": "info"
         },
         "format": {
           "type": "string",
-          "enum": ["text", "json"],
+          "enum": [
+            "text",
+            "json"
+          ],
           "default": "text"
         }
       }
@@ -46,28 +66,85 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "depth_limit": { "type": "integer", "minimum": 0, "default": 0 },
-        "issue_cap": { "type": "integer", "minimum": 0, "default": 500 },
-        "time_cap_seconds": { "type": "integer", "minimum": 0, "default": 0 },
-        "concurrency": { "type": "integer", "minimum": 1, "default": 3 },
-        "refetch": { "type": "boolean", "default": false },
-        "include_comments": { "type": "boolean", "default": false },
-        "include_children": { "type": "boolean", "default": true },
-        "child_search_limit": { "type": "integer", "minimum": 0, "default": 100 },
-        "epic_link_field": { "type": "string", "default": "" },
-        "include_dev_status": { "type": "boolean", "default": true },
+        "depth_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "issue_cap": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 500
+        },
+        "time_cap_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3
+        },
+        "refetch": {
+          "type": "boolean",
+          "default": false
+        },
+        "include_comments": {
+          "type": "boolean",
+          "default": false
+        },
+        "include_children": {
+          "type": "boolean",
+          "default": true
+        },
+        "child_search_limit": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 100
+        },
+        "epic_link_field": {
+          "type": "string",
+          "default": ""
+        },
+        "include_dev_status": {
+          "type": "boolean",
+          "default": true
+        },
         "dev_status_applications": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "dev_status_data_types": {
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["pullrequest", "branch", "commit", "repository", "build"]
+            "enum": [
+              "pullrequest",
+              "branch",
+              "commit",
+              "repository",
+              "build"
+            ]
           }
         },
-        "render_null_custom_fields": { "type": "boolean", "default": false }
+        "render_null_custom_fields": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "type": "string",
+          "default": "127.0.0.1:50051",
+          "description": "gRPC server bind address."
+        }
       }
     }
   }

@@ -26,6 +26,7 @@ func TestDefaultApp(t *testing.T) {
 	assert.Equal(t, DefaultCrawlSettings(), got.Crawl, "Crawl")
 	assert.Equal(t, DefaultOutputSettings(), got.Output, "Output")
 	assert.Equal(t, DefaultLogSettings(), got.Log, "Log")
+	assert.Equal(t, DefaultServerSettings(), got.Server, "Server")
 }
 
 // TestApp_NestedEnvTags asserts that every entity field carries
@@ -35,7 +36,7 @@ func TestDefaultApp(t *testing.T) {
 // §2.2.
 func TestApp_NestedEnvTags(t *testing.T) {
 	rt := reflect.TypeOf(App{})
-	for _, name := range []string{"Jira", "Crawl", "Output", "Log"} {
+	for _, name := range []string{"Jira", "Crawl", "Output", "Log", "Server"} {
 		sf, ok := rt.FieldByName(name)
 		require.True(t, ok, "field %q missing from App", name)
 		assert.Equal(t, ",nested", sf.Tag.Get("env"),

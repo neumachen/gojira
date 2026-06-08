@@ -28,13 +28,6 @@ const SchemaVersion = "gojira.config.v1"
 // an empty per-field envName (the part before the comma in the tag),
 // preserves each leaf's declared env key verbatim — verified in
 // internal/config/app_test.go.
-//
-// Future extension point: a ServerSettings entity (e.g. gRPC bind
-// address, TLS material, request timeouts) will live alongside the
-// existing four when the gRPC frontend lands in Phase 1 of the
-// roadmap. It is intentionally not declared as a field here — adding
-// an empty struct now would commit the YAML schema to a name and
-// shape that the gRPC PRD has not yet specified.
 type App struct {
 	// Schema is the configuration schema identifier; must equal
 	// [SchemaVersion] when validated. Sourced from
@@ -60,6 +53,9 @@ type App struct {
 
 	// Log holds the logging-subsystem settings.
 	Log LogSettings `yaml:"log" json:"log" env:",nested"`
+
+	// Server holds the gRPC server settings.
+	Server ServerSettings `yaml:"server" json:"server" env:",nested"`
 }
 
 // DefaultApp returns an [App] populated with [SchemaVersion] and each
@@ -74,6 +70,7 @@ func DefaultApp() App {
 		Crawl:      DefaultCrawlSettings(),
 		Output:     DefaultOutputSettings(),
 		Log:        DefaultLogSettings(),
+		Server:     DefaultServerSettings(),
 	}
 }
 

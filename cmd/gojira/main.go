@@ -583,7 +583,7 @@ func runCrawl(ctx context.Context, cmd *cli.Command, env map[string]string, sign
 
 	// Run the crawl.
 	start := time.Now()
-	summary, crawlErr := gojira.Crawl(ctx, cfg, []string{issueKey}, sink)
+	summary, crawlErr := gojira.CrawlWithLogger(ctx, cfg, []string{issueKey}, sink, logger)
 	elapsed := time.Since(start)
 
 	// Print the summary report to stderr (PRD AC 18, unchanged format).

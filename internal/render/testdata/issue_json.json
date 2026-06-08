@@ -1,0 +1,63 @@
+{
+  "issue": {
+    "Key": "EXAMPLE-1",
+    "NumericID": "",
+    "Summary": "Example issue for JSON rendering",
+    "Status": "In Progress",
+    "IssueType": "Story",
+    "Assignee": "Alice",
+    "Reporter": "Bob",
+    "Created": "2024-01-15T10:00:00Z",
+    "Updated": "2024-06-01T12:30:00Z",
+    "SourceURL": "https://example.atlassian.net/browse/EXAMPLE-1",
+    "Description": null,
+    "Parent": null,
+    "Subtasks": null,
+    "Children": null,
+    "IssueLinks": null,
+    "RemoteLinks": null,
+    "CustomFields": {},
+    "Names": null,
+    "DevStatus": {
+      "PullRequests": null,
+      "Branches": null,
+      "Commits": null,
+      "Repositories": null,
+      "Builds": null
+    }
+  },
+  "references": [
+    {
+      "Kind": 0,
+      "IssueKey": "EXAMPLE-2",
+      "URL": "",
+      "Text": "",
+      "Source": 1,
+      "Relation": "",
+      "ClassifyResult": {
+        "Kind": 0,
+        "IssueKey": "EXAMPLE-2",
+        "URL": "",
+        "Owner": "",
+        "Repo": "",
+        "PRNumber": 0
+      }
+    },
+    {
+      "Kind": 3,
+      "IssueKey": "",
+      "URL": "https://example.com/doc",
+      "Text": "External doc",
+      "Source": 2,
+      "Relation": "",
+      "ClassifyResult": {
+        "Kind": 3,
+        "IssueKey": "",
+        "URL": "https://example.com/doc",
+        "Owner": "",
+        "Repo": "",
+        "PRNumber": 0
+      }
+    }
+  ]
+}

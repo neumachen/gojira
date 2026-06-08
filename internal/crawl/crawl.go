@@ -40,6 +40,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -59,6 +60,8 @@ import (
 	"github.com/neumachen/gojira/internal/output"
 	"github.com/neumachen/gojira/internal/parse"
 	"github.com/neumachen/gojira/internal/render"
+	"github.com/neumachen/gojira/internal/trace"
+	gojiralog "github.com/neumachen/gojira/log"
 )
 
 // ChildDiscoverer is the interface the crawl orchestrator depends on for
@@ -210,7 +213,51 @@ type crawler struct {
 	// abortErr holds the first fatal error (401).
 	abortErr  error
 	abortOnce sync.Once
+
+	// logger is the orchestrator's slog sink. It is always non-nil
+	// after construction (defaulting to [noopLogger]) so emission sites
+	// can call c.logger.LogAttrs unconditionally. A real (non-noop)
+	// logger is installed by [CrawlWithEnrichers] via the
+	// [defaultCrawlerLogger] seam, which production wires to noop and
+	// tests override to capture span output.
+	logger *slog.Logger
+
+	// rootSpan identifies this crawl run. Every span instrumented by the
+	// orchestrator is a descendant of rootSpan. Created once in
+	// [CrawlWithEnrichers]; immutable for the lifetime of the run.
+	rootSpan trace.Span
 }
+
+// noopLogger returns a [*slog.Logger] whose handler always returns false
+// from Enabled and silently discards Handle calls — used as the safe
+// default when no logger is injected. Avoids nil checks at every
+// emission site and lets the span-instrumentation code unconditionally
+// call LogAttrs without affecting behavior or producing output.
+func noopLogger() *slog.Logger {
+	return slog.New(noopHandler{})
+}
+
+// noopHandler is the [slog.Handler] backing [noopLogger]. All four
+// methods are no-ops; WithAttrs and WithGroup return the same handler
+// so chained .With(...) calls remain cheap and side-effect-free.
+type noopHandler struct{}
+
+func (noopHandler) Enabled(context.Context, slog.Level) bool  { return false }
+func (noopHandler) Handle(context.Context, slog.Record) error { return nil }
+func (noopHandler) WithAttrs([]slog.Attr) slog.Handler        { return noopHandler{} }
+func (noopHandler) WithGroup(string) slog.Handler             { return noopHandler{} }
+
+// defaultCrawlerLogger is the package-level seam used by
+// [CrawlWithEnrichers] to obtain the crawler's base logger. Production
+// returns [noopLogger] so the orchestrator emits nothing and existing
+// callers/on-disk results are byte-identical. White-box tests
+// (crawl_internal_test.go) override this to inject a real
+// [*slog.Logger] that captures span output to a [bytes.Buffer].
+//
+// This indirection is a deliberate stop-gap for phase-d-thread-2: the
+// next task (phase-d-thread-3) widens [CrawlWithEnrichers]' signature
+// with an explicit logger parameter and removes the seam.
+var defaultCrawlerLogger = noopLogger
 
 // closeQueueLocked closes the work queue. Must be called with c.mu held.
 // It is a no-op if the queue is already closed.
@@ -269,6 +316,28 @@ func (c *crawler) enqueue(key string, depth int) {
 	c.queue <- workItem{key: norm, depth: depth}
 }
 
+// enqueueFrom is [enqueue] plus a TRACE-level lineage record carrying
+// which issue surfaced this reference and via which relationship type
+// (e.g. "hierarchy_child", "outward Blocks", "ref"). It is the
+// orchestrator's own record of why this key entered the queue,
+// distinct from the existing [events.KindIssueQueued] sink events: the
+// fan-out tree is reconstructed from these lines by joining on
+// discovered_from. Must be called with c.mu held (delegates to
+// [enqueue], which has the same precondition).
+//
+// The TRACE level is deliberate: lineage is the canonical
+// traceability use case, dense in big crawls, and worth filtering out
+// at INFO/DEBUG.
+func (c *crawler) enqueueFrom(key string, depth int, discoveredFrom, relation string) {
+	c.logger.LogAttrs(c.crawlCtx, gojiralog.LevelTrace, "crawl.fanout",
+		slog.String(trace.AttrTicketID, strings.ToUpper(key)),
+		slog.Int(trace.AttrDepth, depth),
+		slog.String("discovered_from", discoveredFrom),
+		slog.String("relation", relation),
+	)
+	c.enqueue(key, depth)
+}
+
 // decrementPending decrements the pending counter. If it reaches zero,
 // the queue is closed (under c.mu) so workers exit their range loop.
 func (c *crawler) decrementPending() {
@@ -285,11 +354,36 @@ func (c *crawler) processIssue(item workItem) error {
 	key := item.key
 	depth := item.depth
 
+	// Per-issue span. Phase is left empty here — the issue-level span is
+	// an envelope; the per-phase blocks below stamp their own phase via
+	// .With on the span logger.
+	span := c.rootSpan.Child("", strings.ToUpper(key), depth)
+	spanLogger := span.Logger(c.logger)
+	spanStart := time.Now()
+	spanLogger.LogAttrs(c.crawlCtx, slog.LevelInfo, "issue.process.start",
+		slog.String(trace.AttrTicketID, strings.ToUpper(key)),
+		slog.Int(trace.AttrDepth, depth),
+	)
+	// Bind the span logger to ctx so the httplog RoundTripper picks it
+	// up for downstream HTTP requests (fetch, hierarchy JQL, dev-status).
+	ctx := trace.WithLogger(c.crawlCtx, spanLogger)
+	defer func() {
+		spanLogger.LogAttrs(c.crawlCtx, slog.LevelInfo, "issue.process.end",
+			slog.String(trace.AttrTicketID, strings.ToUpper(key)),
+			slog.Int(trace.AttrDepth, depth),
+			slog.Int64("duration_ms", time.Since(spanStart).Milliseconds()),
+		)
+	}()
+
 	// Skip-if-exists probe: check before fetching to avoid burning an
 	// API call. This lives in crawl because output.ErrAlreadyExists fires
 	// only after a fetch; the pre-fetch short-circuit is a crawl-level
 	// optimization.
 	if !c.cfg.Refetch && indexExists(c.cfg.OutputDir, key) {
+		spanLogger.LogAttrs(ctx, slog.LevelDebug, "crawl.skip_if_exists",
+			slog.String(trace.AttrTicketID, key),
+			slog.String("reason", "index_md_exists"),
+		)
 		c.sink.Emit(events.Event{
 			Kind:      events.KindIssueSkipped,
 			IssueKey:  key,
@@ -303,13 +397,39 @@ func (c *crawler) processIssue(item workItem) error {
 	}
 
 	// Fetch.
-	raw, fetchErr := c.fetcher.Fetch(c.crawlCtx, key)
+	var raw []byte
+	var fetchErr error
+	{
+		fl := spanLogger.With(trace.AttrPhase, trace.PhaseFetch)
+		fctx := trace.WithLogger(ctx, fl)
+		fstart := time.Now()
+		fl.LogAttrs(fctx, slog.LevelInfo, "phase.start",
+			slog.String(trace.AttrPhase, trace.PhaseFetch),
+			slog.String(trace.AttrTicketID, key),
+		)
+		raw, fetchErr = c.fetcher.Fetch(fctx, key)
+		fl.LogAttrs(fctx, slog.LevelInfo, "phase.end",
+			slog.String(trace.AttrPhase, trace.PhaseFetch),
+			slog.String(trace.AttrTicketID, key),
+			slog.Int64("duration_ms", time.Since(fstart).Milliseconds()),
+			slog.Bool("ok", fetchErr == nil),
+		)
+	}
 	if fetchErr != nil {
 		return c.handleFetchError(key, fetchErr)
 	}
 
-	// Parse.
+	// Parse. Pure CPU, but still measured so total per-issue accounting
+	// can attribute time to each phase. A single inline INFO line is
+	// enough; parse is fast and synchronous.
+	pstart := time.Now()
 	issue, parseErr := parse.Parse(raw, c.cfg.Site)
+	spanLogger.LogAttrs(ctx, slog.LevelInfo, "phase.end",
+		slog.String(trace.AttrPhase, trace.PhaseParse),
+		slog.String(trace.AttrTicketID, key),
+		slog.Int64("duration_ms", time.Since(pstart).Milliseconds()),
+		slog.Bool("ok", parseErr == nil),
+	)
 	if parseErr != nil {
 		reason := fmt.Sprintf("parse error: %v", parseErr)
 		c.sink.Emit(events.Event{
@@ -359,7 +479,20 @@ func (c *crawler) processIssue(item workItem) error {
 	// populated slice.
 	var childKeys []string
 	if c.cfg.IncludeChildren && c.hier != nil && hierarchy.HierarchyCapable(issue.IssueType) {
-		discovered, err := c.hier.Children(c.crawlCtx, issue)
+		hl := spanLogger.With(trace.AttrPhase, trace.PhaseHierarchyJQL)
+		hctx := trace.WithLogger(ctx, hl)
+		hstart := time.Now()
+		hl.LogAttrs(hctx, slog.LevelInfo, "phase.start",
+			slog.String(trace.AttrPhase, trace.PhaseHierarchyJQL),
+			slog.String(trace.AttrTicketID, key),
+		)
+		discovered, err := c.hier.Children(hctx, issue)
+		hl.LogAttrs(hctx, slog.LevelInfo, "phase.end",
+			slog.String(trace.AttrPhase, trace.PhaseHierarchyJQL),
+			slog.String(trace.AttrTicketID, key),
+			slog.Int64("duration_ms", time.Since(hstart).Milliseconds()),
+			slog.Bool("ok", err == nil),
+		)
 		if err != nil {
 			// Non-fatal: the issue itself is rendered; we just missed
 			// (some of) its children. Emit a failure event so operators
@@ -405,7 +538,20 @@ func (c *crawler) processIssue(item workItem) error {
 	// and has already returned by this point. Render observes the
 	// populated struct when it runs next.
 	if c.devStatus != nil && c.cfg.IncludeDevStatus {
-		discovered, err := c.devStatus.Enrich(c.crawlCtx, issue)
+		dl := spanLogger.With(trace.AttrPhase, trace.PhaseDevStatus)
+		dctx := trace.WithLogger(ctx, dl)
+		dstart := time.Now()
+		dl.LogAttrs(dctx, slog.LevelInfo, "phase.start",
+			slog.String(trace.AttrPhase, trace.PhaseDevStatus),
+			slog.String(trace.AttrTicketID, key),
+		)
+		discovered, err := c.devStatus.Enrich(dctx, issue)
+		dl.LogAttrs(dctx, slog.LevelInfo, "phase.end",
+			slog.String(trace.AttrPhase, trace.PhaseDevStatus),
+			slog.String(trace.AttrTicketID, key),
+			slog.Int64("duration_ms", time.Since(dstart).Milliseconds()),
+			slog.Bool("ok", err == nil),
+		)
 		if err != nil {
 			msg := fmt.Sprintf("dev status enrichment partially failed for %s: %v", key, err)
 			if !hasAnyDevStatusEntity(discovered) {
@@ -466,7 +612,14 @@ func (c *crawler) processIssue(item workItem) error {
 	// the config so the renderer can decide whether to surface or
 	// suppress JSON-null custom-field entries; the default
 	// (false) drops them to reduce noise.
+	rstart := time.Now()
 	indexMD, renderErr := render.RenderIssue(issue, neighbours, c.cfg.RenderNullCustomFields)
+	spanLogger.LogAttrs(ctx, slog.LevelInfo, "phase.end",
+		slog.String(trace.AttrPhase, trace.PhaseRender),
+		slog.String(trace.AttrTicketID, key),
+		slog.Int64("duration_ms", time.Since(rstart).Milliseconds()),
+		slog.Bool("ok", renderErr == nil),
+	)
 	if renderErr != nil {
 		reason := fmt.Sprintf("render error: %v", renderErr)
 		c.sink.Emit(events.Event{
@@ -502,7 +655,20 @@ func (c *crawler) processIssue(item workItem) error {
 	}
 
 	// Write to disk via the injected Store.
-	writeErr := c.store.Write(c.crawlCtx, key, indexMD, outboundMD)
+	sl := spanLogger.With(trace.AttrPhase, trace.PhaseStore)
+	sctx := trace.WithLogger(ctx, sl)
+	sstart := time.Now()
+	sl.LogAttrs(sctx, slog.LevelInfo, "phase.start",
+		slog.String(trace.AttrPhase, trace.PhaseStore),
+		slog.String(trace.AttrTicketID, key),
+	)
+	writeErr := c.store.Write(sctx, key, indexMD, outboundMD)
+	sl.LogAttrs(sctx, slog.LevelInfo, "phase.end",
+		slog.String(trace.AttrPhase, trace.PhaseStore),
+		slog.String(trace.AttrTicketID, key),
+		slog.Int64("duration_ms", time.Since(sstart).Milliseconds()),
+		slog.Bool("ok", writeErr == nil),
+	)
 	if writeErr != nil {
 		if errors.Is(writeErr, output.ErrAlreadyExists) {
 			// Race: another goroutine wrote this key between our probe
@@ -552,7 +718,15 @@ func (c *crawler) processIssue(item workItem) error {
 		switch ref.Kind {
 		case classify.KindJiraKey, classify.KindJiraURL:
 			if ref.IssueKey != "" {
-				c.enqueue(ref.IssueKey, depth+1)
+				// Lineage: prefer the structured IssueLink relation
+				// (e.g. "outward Blocks"); fall back to the discovery
+				// Source label ("Description", "RemoteLink", …) so
+				// every fan-out edge carries some relation context.
+				rel := ref.Relation
+				if rel == "" {
+					rel = ref.Source.String()
+				}
+				c.enqueueFrom(ref.IssueKey, depth+1, key, rel)
 			}
 		case classify.KindGitHubPR:
 			if ref.URL != "" && !c.seenPRs[ref.URL] {
@@ -606,7 +780,7 @@ func (c *crawler) processIssue(item workItem) error {
 			Message:   fmt.Sprintf("hierarchy child of %s discovered: %s", key, ck),
 			Timestamp: time.Now(),
 		})
-		c.enqueue(ck, depth+1)
+		c.enqueueFrom(ck, depth+1, key, "hierarchy_child")
 	}
 	c.mu.Unlock()
 
@@ -887,7 +1061,18 @@ func CrawlWithEnrichers(
 		seenPRs:     make(map[string]bool),
 		summary:     Summary{FailedKeys: make(map[string]string)},
 		queue:       make(chan workItem, queueBuf),
+		logger:      defaultCrawlerLogger(),
 	}
+	// Tag every record emitted by the orchestrator with
+	// trace_stream=stream so a consumer can distinguish orchestration
+	// lines from the HTTP RoundTripper's response-stream lines (which
+	// stamp trace_stream=response). The .With is harmless on a noop
+	// handler and meaningful on any real handler installed by tests
+	// or by phase-d-thread-3.
+	c.logger = c.logger.With(trace.AttrTraceStream, trace.StreamStream)
+	// rootSpan is created exactly once and identifies the whole run.
+	// Every per-issue span is a child of rootSpan via [Span.Child].
+	c.rootSpan = trace.NewRoot()
 
 	// Seed the queue with start keys.
 	c.mu.Lock()
@@ -899,6 +1084,30 @@ func CrawlWithEnrichers(
 		c.closeQueueLocked()
 	}
 	c.mu.Unlock()
+
+	// Run-level span envelope: crawl.start opens the run, crawl.end
+	// closes it with the structured summary counts and total
+	// duration. Both lines carry run_id/span_id from rootSpan so
+	// downstream consumers can group every per-issue line into this
+	// run.
+	c.logger.LogAttrs(crawlCtx, slog.LevelInfo, "crawl.start",
+		slog.String(trace.AttrRunID, c.rootSpan.RunID),
+		slog.String(trace.AttrSpanID, c.rootSpan.SpanID),
+		slog.Int("concurrency", concurrency),
+		slog.Int("seed_count", len(startKeys)),
+	)
+	defer func() {
+		c.logger.LogAttrs(crawlCtx, slog.LevelInfo, "crawl.end",
+			slog.String(trace.AttrRunID, c.rootSpan.RunID),
+			slog.String(trace.AttrSpanID, c.rootSpan.SpanID),
+			slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+			slog.Int("fetched", c.summary.Fetched),
+			slog.Int("skipped", c.summary.Skipped),
+			slog.Int("stubbed", c.summary.Stubbed),
+			slog.Int("failed", c.summary.Failed),
+			slog.Int("cap_limited", c.summary.CapLimited),
+		)
+	}()
 
 	// Closer goroutine: when the context is cancelled, drain the queue
 	// and close it so workers exit their range loop.

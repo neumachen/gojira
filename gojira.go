@@ -41,6 +41,7 @@ package gojira
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/neumachen/errext"
 	"github.com/neumachen/gojira/classify"
@@ -122,6 +123,17 @@ var (
 	// ErrRateLimited is returned when Jira responds with 429 and all
 	// retry attempts are exhausted.
 	ErrRateLimited = client.ErrRateLimited
+
+	// ErrBadRequest is returned when Jira responds with 400 (validation
+	// failure). The concrete error may be a [*client.APIError] carrying
+	// the failing field names; errors.Is(err, ErrBadRequest) still
+	// matches via Unwrap.
+	ErrBadRequest = client.ErrBadRequest
+
+	// ErrConflict is returned when Jira responds with 409, e.g. an
+	// invalid workflow transition. As with ErrBadRequest, an *APIError
+	// may wrap this sentinel while still satisfying errors.Is.
+	ErrConflict = client.ErrConflict
 
 	// ErrConfigMissingRequired is returned (wrapped) by [LoadConfig] /
 	// [LoadAppConfig] when a required configuration value is absent.
@@ -540,4 +552,149 @@ func kindLabel(k classify.Kind) string {
 	default:
 		return "external"
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: Jira write operations (facade)
+// ---------------------------------------------------------------------------
+//
+// These functions mirror [GetIssue]'s pattern: build a client from cfg,
+// delegate to the client.* write method, wrap the error with errext.Errorf
+// so the underlying sentinel / *client.APIError is preserved via %w.
+// Field selection is supplied via the [client.CreateOption]/UpdateOption/
+// CommentOption/TransitionOption sets — the extensibility seam locked in
+// by phase-b-builder-2.
+
+// CreateIssue creates a new Jira issue under the given project key with the
+// supplied issue-type name. Field selection — summary, description, labels,
+// assignee, parent, custom fields — flows through the [client.CreateOption]
+// set. On success the returned [client.CreatedIssue] carries Jira's
+// {key, id, self} response. On 400 the error is a [*client.APIError] that
+// satisfies errors.Is against [ErrBadRequest] and exposes per-field
+// validation messages via errors.As.
+func CreateIssue(ctx context.Context, cfg Config, project, issueType string, opts ...client.CreateOption) (client.CreatedIssue, error) {
+	c, err := client.New(cfg)
+	if err != nil {
+		return client.CreatedIssue{}, errext.Errorf("gojira: build client: %w", err)
+	}
+	got, err := c.CreateIssue(ctx, project, issueType, opts...)
+	if err != nil {
+		return client.CreatedIssue{}, errext.Errorf("gojira: create issue: %w", err)
+	}
+	return got, nil
+}
+
+// UpdateIssue edits fields on the issue identified by key. Field selection
+// flows through [client.UpdateOption]. Jira returns 204 on success; this
+// function returns nil. 400 surfaces a [*client.APIError] wrapping
+// [ErrBadRequest]; 404 surfaces [ErrNotFound].
+func UpdateIssue(ctx context.Context, cfg Config, key string, opts ...client.UpdateOption) error {
+	c, err := client.New(cfg)
+	if err != nil {
+		return errext.Errorf("gojira: build client: %w", err)
+	}
+	if err := c.UpdateIssue(ctx, key, opts...); err != nil {
+		return errext.Errorf("gojira: update issue %s: %w", key, err)
+	}
+	return nil
+}
+
+// AddComment appends a comment to the issue identified by key. The comment
+// body is supplied via [client.WithCommentText] (plain text → ADF) or
+// [client.WithCommentADF] (rich, caller-supplied ADF). The returned
+// [client.Comment] carries Jira's id/author/created fields.
+func AddComment(ctx context.Context, cfg Config, key string, opts ...client.CommentOption) (client.Comment, error) {
+	c, err := client.New(cfg)
+	if err != nil {
+		return client.Comment{}, errext.Errorf("gojira: build client: %w", err)
+	}
+	got, err := c.AddComment(ctx, key, opts...)
+	if err != nil {
+		return client.Comment{}, errext.Errorf("gojira: add comment to %s: %w", key, err)
+	}
+	return got, nil
+}
+
+// ListTransitions returns the workflow transitions currently available for
+// the issue identified by key. Jira surfaces only transitions whose
+// preconditions are met for the issue's current state, so the result is
+// workflow- and state-dependent.
+func ListTransitions(ctx context.Context, cfg Config, key string) ([]client.Transition, error) {
+	c, err := client.New(cfg)
+	if err != nil {
+		return nil, errext.Errorf("gojira: build client: %w", err)
+	}
+	got, err := c.ListTransitions(ctx, key)
+	if err != nil {
+		return nil, errext.Errorf("gojira: list transitions for %s: %w", key, err)
+	}
+	return got, nil
+}
+
+// TransitionIssue moves the issue identified by key through the workflow
+// transition with id transitionID. Use [client.WithTransitionField] and
+// [client.WithTransitionCommentText] to set fields or append a comment as
+// part of the transition. Jira returns 204 on success.
+func TransitionIssue(ctx context.Context, cfg Config, key, transitionID string, opts ...client.TransitionOption) error {
+	c, err := client.New(cfg)
+	if err != nil {
+		return errext.Errorf("gojira: build client: %w", err)
+	}
+	if err := c.TransitionIssue(ctx, key, transitionID, opts...); err != nil {
+		return errext.Errorf("gojira: transition %s via %s: %w", key, transitionID, err)
+	}
+	return nil
+}
+
+// TransitionIssueByStatus resolves the workflow transition whose target
+// status name matches targetStatusName (case-insensitive) via
+// [ListTransitions], then executes it.
+//
+// It returns a clear error when no transition matches (typically because
+// the issue is not in a state from which that target is reachable) or
+// when more than one transition shares the same target status — gojira
+// will not silently pick one. The convenience costs one extra GET
+// (the ListTransitions call) relative to passing a transition id directly
+// to [TransitionIssue].
+func TransitionIssueByStatus(ctx context.Context, cfg Config, key, targetStatusName string, opts ...client.TransitionOption) error {
+	transitions, err := ListTransitions(ctx, cfg, key)
+	if err != nil {
+		return err
+	}
+
+	matches := make([]client.Transition, 0, 1)
+	for _, t := range transitions {
+		if strings.EqualFold(t.ToStatus, targetStatusName) {
+			matches = append(matches, t)
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return errext.Errorf("gojira: no transition to status %q for %s", targetStatusName, key)
+	case 1:
+		return TransitionIssue(ctx, cfg, key, matches[0].ID, opts...)
+	default:
+		return errext.Errorf("gojira: ambiguous transition to status %q for %s (%d matches)",
+			targetStatusName, key, len(matches))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Dry-run request body builders (phase-d-facade-3)
+// ---------------------------------------------------------------------------
+
+// BuildCreateIssueBody returns the JSON request body [CreateIssue] would
+// POST, without contacting Jira. It is a pure pass-through over
+// [client.RenderCreateBody], exposed at the facade so CLI / agent callers
+// can preview a write before mutating.
+func BuildCreateIssueBody(project, issueType string, opts ...client.CreateOption) ([]byte, error) {
+	return client.RenderCreateBody(project, issueType, opts...)
+}
+
+// BuildUpdateIssueBody returns the JSON request body [UpdateIssue] would
+// PUT, without contacting Jira. Like [BuildCreateIssueBody] it is a
+// pure pass-through — no network, no client construction.
+func BuildUpdateIssueBody(opts ...client.UpdateOption) ([]byte, error) {
+	return client.RenderUpdateBody(opts...)
 }

@@ -814,7 +814,7 @@ func CrawlWithDiscoverer(
 	sink events.Sink,
 	hier ChildDiscoverer,
 ) (Summary, error) {
-	return CrawlWithEnrichers(ctx, cfg, startKeys, fetcher, sink, hier, nil)
+	return CrawlWithEnrichers(ctx, cfg, startKeys, fetcher, sink, hier, nil, nil)
 }
 
 // CrawlWithEnrichers is the extended entry point that accepts both a
@@ -827,6 +827,15 @@ func CrawlWithDiscoverer(
 // cfg.IncludeDevStatus respectively). The gojira facade constructs
 // both from the shared *client.Client and supplies them here.
 //
+// The store parameter is additive over the previous signature: it
+// selects the destination for rendered Markdown. Passing nil defaults
+// to an [output.FSStore] rooted at cfg.OutputDir, preserving the
+// historical on-disk behavior (skip-if-exists vs. refetch semantics
+// continue to be honored). Alternative [output.Store] implementations
+// can be injected by callers that want to deliver crawl output to a
+// non-filesystem destination (e.g. an in-memory buffer or a future
+// service front-end).
+//
 // The signature is additive over [CrawlWithDiscoverer]; existing
 // callers that only need hierarchy expansion are unaffected.
 func CrawlWithEnrichers(
@@ -837,7 +846,13 @@ func CrawlWithEnrichers(
 	sink events.Sink,
 	hier ChildDiscoverer,
 	devStatus DevStatusEnricher,
+	store output.Store,
 ) (Summary, error) {
+	// When the caller passes a nil store, default to an FSStore rooted
+	// at cfg.OutputDir, preserving the historical on-disk behavior.
+	if store == nil {
+		store = output.NewFSStore(cfg.OutputDir, cfg.Refetch)
+	}
 	start := time.Now()
 
 	concurrency := cfg.Concurrency
@@ -863,7 +878,7 @@ func CrawlWithEnrichers(
 		cfg:         cfg,
 		fetcher:     fetcher,
 		sink:        sink,
-		store:       output.NewFSStore(cfg.OutputDir, cfg.Refetch),
+		store:       store,
 		hier:        hier,
 		devStatus:   devStatus,
 		crawlCtx:    crawlCtx,

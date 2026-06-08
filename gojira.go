@@ -52,6 +52,7 @@ import (
 	"github.com/neumachen/gojira/internal/extract"
 	"github.com/neumachen/gojira/internal/fetch"
 	"github.com/neumachen/gojira/internal/hierarchy"
+	"github.com/neumachen/gojira/internal/output"
 	"github.com/neumachen/gojira/internal/parse"
 	"github.com/neumachen/gojira/internal/render"
 )
@@ -454,6 +455,16 @@ func FetchAndRender(ctx context.Context, cfg Config, key string, opts ...client.
 // When cfg.Refetch is false (the default), issues whose index.md already
 // exists on disk are skipped without making an API call. This makes repeated
 // runs additive and fast.
+//
+// # Output destination
+//
+// Crawl output is delivered through an injectable [output.Store]. This
+// facade constructs the default — an [output.FSStore] that writes the
+// canonical <key>/index.md and references/outbound.md layout to
+// cfg.OutputDir, honoring skip-if-exists vs. refetch — and passes it
+// through to the crawl orchestrator. Alternative Store implementations
+// can be injected at the crawl layer for callers that need to deliver
+// crawl output somewhere other than the local filesystem.
 func Crawl(ctx context.Context, cfg Config, startKeys []string, sink Sink) (Summary, error) {
 	if sink == nil {
 		sink = events.NoopSink{}
@@ -480,7 +491,13 @@ func Crawl(ctx context.Context, cfg Config, startKeys []string, sink Sink) (Summ
 	// orchestrator and inside the enricher itself.
 	prs := devstatus.New(c, cfg)
 
-	return crawl.CrawlWithEnrichers(ctx, cfg, startKeys, f, sink, hier, prs)
+	// Crawl output is delivered through an injectable output.Store. The
+	// default is an FSStore that writes the canonical <key>/index.md and
+	// references/outbound.md layout to cfg.OutputDir, honoring
+	// skip-if-exists vs. refetch. Alternative Stores (e.g. for a future
+	// service front-end) can be injected at the crawl layer.
+	store := output.NewFSStore(cfg.OutputDir, cfg.Refetch)
+	return crawl.CrawlWithEnrichers(ctx, cfg, startKeys, f, sink, hier, prs, store)
 }
 
 // ---------------------------------------------------------------------------

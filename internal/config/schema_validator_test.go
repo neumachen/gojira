@@ -144,3 +144,39 @@ func TestSchemaValidator_NilReceiver(t *testing.T) {
 	err := sv.ValidateRaw(map[string]any{})
 	require.Error(t, err)
 }
+
+// TestSchemaValidator_ServerAddress_Valid asserts that a document
+// containing a well-formed server.address string passes Layer-1
+// schema validation. The server block is optional in the schema, so
+// its presence with a valid string value must not cause a rejection.
+func TestSchemaValidator_ServerAddress_Valid(t *testing.T) {
+	sv, err := NewSchemaValidator()
+	require.NoError(t, err)
+
+	doc := validRawDoc(t)
+	doc["server"] = map[string]any{"address": "0.0.0.0:9090"}
+
+	require.NoError(t, sv.ValidateRaw(doc),
+		"server.address with a valid string must pass Layer-1 validation")
+}
+
+// TestSchemaValidator_ServerNotObject asserts that the schema rejects
+// a server value that is a plain string instead of an object. The
+// schema declares server as type:object with additionalProperties:false,
+// so a scalar value must fail at Layer 1 and wrap ErrInvalidValue.
+func TestSchemaValidator_ServerNotObject(t *testing.T) {
+	sv, err := NewSchemaValidator()
+	require.NoError(t, err)
+
+	doc := validRawDoc(t)
+	doc["server"] = "not-an-object"
+
+	err = sv.ValidateRaw(doc)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidValue,
+		"type mismatch on server must wrap ErrInvalidValue")
+
+	var verrs *ValidationErrors
+	require.True(t, errors.As(err, &verrs))
+	require.True(t, verrs.HasErrors())
+}

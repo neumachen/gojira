@@ -312,10 +312,38 @@ authentication**.
 | `Classify` | unary | Classify a bare key or URL into `JiraKey`, `JiraURL`, `GitHubPR`, or `External`. |
 | `GetIssue` | unary | Fetch one issue. The response is a structured proto `Issue`, rendered Markdown, or JSON, selected by the request's `OutputFormat` (`STRUCTURED`, `MARKDOWN`, `JSON`). |
 | `Crawl` | server-streaming | Recursively crawl from one or more start keys, streaming a `CrawlEvent` for each state transition. Issue content is written server-side to the configured output directory (streaming content over the wire is deferred to Phase 2). |
+| `CreateIssue` | unary | Create an issue (project + type required; fields via summary/description/labels/parent and a `raw_fields` map). `dry_run` returns the request body the server would send, without creating anything. |
+| `UpdateIssue` | unary | Edit fields on an existing issue. Honors `dry_run` like `CreateIssue`. |
+| `AddComment` | unary | Append a comment (plain text, converted to ADF server-side) to an issue. |
+| `ListTransitions` | unary | List the workflow transitions currently available for an issue (id, name, target status). |
+| `TransitionIssue` | unary | Move an issue through a transition, selected by `transition_id` or by `target_status_name` (resolved server-side via `ListTransitions`). |
 
 The proto contract is defined in
 [`proto/gojira/v1/gojira.proto`](./proto/gojira/v1/gojira.proto) and the
 generated Go bindings live under `gen/gojira/v1/`.
+
+### Write operations
+
+The `CreateIssue`, `UpdateIssue`, `AddComment`, and `TransitionIssue` RPCs let
+clients mutate Jira through the same single-tenant identity the server loaded
+at startup. Two design points are worth calling out:
+
+- **Dry-run.** `CreateIssue` and `UpdateIssue` accept a `dry_run` flag. When
+  set, the server builds and returns the exact JSON request body it *would*
+  send to Jira (in `dry_run_body`) without performing the write — useful for
+  previewing a mutation before committing to it.
+- **Extensible fields.** Beyond the typed fields (summary, description,
+  labels, parent), any Jira field — including tenant-specific custom fields —
+  can be set through the `raw_fields` map (field id → raw JSON value). In the
+  Go library this is the `WithField` / `WithRawFields` option; new fields never
+  require a new method or signature change.
+
+Errors carry Jira's detail: a 400 validation failure maps to gRPC
+`InvalidArgument` with the failing field names in the message; a 409 (e.g. an
+invalid workflow transition) maps to `FailedPrecondition`.
+
+Issue **deletion is intentionally unsupported** — destructive removal is out of
+scope for this phase.
 
 ### Server configuration
 
@@ -348,6 +376,10 @@ a running server. It is a reference tool, not a production front-end.
 go run ./cmd/gojira-client -address 127.0.0.1:50051 -classify PLATENG-1147
 go run ./cmd/gojira-client -address 127.0.0.1:50051 -key PLATENG-1147 -format markdown
 go run ./cmd/gojira-client -address 127.0.0.1:50051 -crawl PLATENG-1147
+go run ./cmd/gojira-client -address 127.0.0.1:50051 -create-project PLATENG -create-type Task -create-summary "New task" -dry-run
+go run ./cmd/gojira-client -address 127.0.0.1:50051 -comment PLATENG-1147 -comment-text "Looks good"
+go run ./cmd/gojira-client -address 127.0.0.1:50051 -transitions PLATENG-1147
+go run ./cmd/gojira-client -address 127.0.0.1:50051 -transition PLATENG-1147 -to-status "In Progress"
 ```
 
 ### Regenerating the proto bindings
@@ -370,6 +402,9 @@ the proto contract, run [buf](https://buf.build):
   Atlassian's UI uses it, but no SLA is offered. Disable with
   `--include-dev-status=false` to opt out.
 - The gRPC service (`gojira serve`) is single-tenant and ships without TLS or authentication; run it only on a loopback or trusted network. Streaming issue content over the wire, multi-tenancy, per-request config overrides, and TLS/auth are deferred to Phase 2.
+- gRPC write operations (`CreateIssue`/`UpdateIssue`/`AddComment`/
+  `TransitionIssue`) use the server's single startup identity; per-request
+  credentials are deferred to a later phase. Issue deletion is not supported.
 
 ## Roadmap
 

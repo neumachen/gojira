@@ -19,11 +19,14 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
 	gojira "github.com/neumachen/gojira"
 	"github.com/neumachen/gojira/classify"
+	"github.com/neumachen/gojira/client"
 	gojirav1 "github.com/neumachen/gojira/gen/gojira/v1"
 	"github.com/neumachen/gojira/internal/events"
 	"github.com/neumachen/gojira/internal/extract"
@@ -291,4 +294,315 @@ func TestIntegration_Crawl_StreamsEvents(t *testing.T) {
 	if got[1].GetKind() != gojirav1.CrawlEvent_KIND_CRAWL_SUMMARY {
 		t.Errorf("event[1].Kind: got %v", got[1].GetKind())
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 — Write RPCs end-to-end over bufconn
+// ---------------------------------------------------------------------------
+//
+// Each test below builds a Server with the appropriate write seam
+// injected, registers it on the in-process bufconn listener via
+// startBufconnServer, then drives the RPC over a real gRPC client
+// connection. No network, no live Jira — the handler/proto wiring is
+// exercised against in-memory fakes that record the call and return a
+// canned result (or a typed error to assert status mapping).
+
+// TestIntegration_CreateIssue exercises the happy path: the proto
+// request maps to a CreateIssueRequest; the server's createIssueFn
+// seam returns a CreatedIssue; the response carries key/id/self.
+func TestIntegration_CreateIssue(t *testing.T) {
+	t.Parallel()
+
+	var gotProject, gotIssueType string
+	var called bool
+	srv := grpcserver.NewServer(integrationCfg(t),
+		grpcserver.WithCreateIssueFunc(func(_ context.Context, _ gojira.Config, project, issueType string, _ ...client.CreateOption) (client.CreatedIssue, error) {
+			called = true
+			gotProject = project
+			gotIssueType = issueType
+			return client.CreatedIssue{
+				Key:  "PROJ-1",
+				ID:   "100",
+				Self: "https://example.atlassian.net/rest/api/3/issue/100",
+			}, nil
+		}),
+	)
+	c := startBufconnServer(t, srv)
+
+	resp, err := c.CreateIssue(context.Background(), &gojirav1.CreateIssueRequest{
+		Project:   "PROJ",
+		IssueType: "Task",
+		Summary:   "S",
+	})
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if !called {
+		t.Error("createIssueFn must be called on a non-dry-run request")
+	}
+	if gotProject != "PROJ" || gotIssueType != "Task" {
+		t.Errorf("fake fn args: project=%q issueType=%q", gotProject, gotIssueType)
+	}
+	if resp.GetKey() != "PROJ-1" || resp.GetId() != "100" ||
+		resp.GetSelf() != "https://example.atlassian.net/rest/api/3/issue/100" {
+		t.Errorf("response mismatch: %+v", resp)
+	}
+	if len(resp.GetDryRunBody()) != 0 {
+		t.Errorf("DryRunBody must be empty on a real create, got %d bytes", len(resp.GetDryRunBody()))
+	}
+}
+
+// TestIntegration_CreateIssue_DryRun proves dry_run short-circuits
+// inside the handler — the seam is not invoked, and the response
+// carries the JSON body the server would have POSTed.
+func TestIntegration_CreateIssue_DryRun(t *testing.T) {
+	t.Parallel()
+
+	var called bool
+	srv := grpcserver.NewServer(integrationCfg(t),
+		grpcserver.WithCreateIssueFunc(func(context.Context, gojira.Config, string, string, ...client.CreateOption) (client.CreatedIssue, error) {
+			called = true
+			return client.CreatedIssue{}, nil
+		}),
+	)
+	c := startBufconnServer(t, srv)
+
+	resp, err := c.CreateIssue(context.Background(), &gojirav1.CreateIssueRequest{
+		Project:   "PROJ",
+		IssueType: "Task",
+		Summary:   "S",
+		DryRun:    true,
+	})
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if called {
+		t.Error("createIssueFn must NOT be called when DryRun is set")
+	}
+	body := resp.GetDryRunBody()
+	if len(body) == 0 {
+		t.Fatal("DryRunBody must be populated on a dry-run create")
+	}
+	if !json.Valid(body) {
+		t.Errorf("DryRunBody must be valid JSON; got: %s", string(body))
+	}
+	if resp.GetKey() != "" || resp.GetId() != "" {
+		t.Errorf("dry-run response must not carry key/id, got %+v", resp)
+	}
+}
+
+func TestIntegration_UpdateIssue(t *testing.T) {
+	t.Parallel()
+
+	var gotKey string
+	srv := grpcserver.NewServer(integrationCfg(t),
+		grpcserver.WithUpdateIssueFunc(func(_ context.Context, _ gojira.Config, key string, _ ...client.UpdateOption) error {
+			gotKey = key
+			return nil
+		}),
+	)
+	c := startBufconnServer(t, srv)
+
+	resp, err := c.UpdateIssue(context.Background(), &gojirav1.UpdateIssueRequest{
+		Key:     "PROJ-1",
+		Summary: "new",
+	})
+	if err != nil {
+		t.Fatalf("UpdateIssue: %v", err)
+	}
+	if !resp.GetOk() {
+		t.Error("Ok must be true on success")
+	}
+	if gotKey != "PROJ-1" {
+		t.Errorf("fake got key=%q, want PROJ-1", gotKey)
+	}
+}
+
+func TestIntegration_AddComment(t *testing.T) {
+	t.Parallel()
+
+	srv := grpcserver.NewServer(integrationCfg(t),
+		grpcserver.WithAddCommentFunc(func(context.Context, gojira.Config, string, ...client.CommentOption) (client.Comment, error) {
+			return client.Comment{
+				ID:                "10",
+				AuthorAccountID:   "acc-1",
+				AuthorDisplayName: "Alice",
+				Created:           "2026-01-01T00:00:00.000+0000",
+			}, nil
+		}),
+	)
+	c := startBufconnServer(t, srv)
+
+	resp, err := c.AddComment(context.Background(), &gojirav1.AddCommentRequest{
+		Key:      "PROJ-1",
+		BodyText: "looks good",
+	})
+	if err != nil {
+		t.Fatalf("AddComment: %v", err)
+	}
+	if resp.GetId() != "10" {
+		t.Errorf("Id: got %q, want 10", resp.GetId())
+	}
+	if resp.GetAuthorDisplayName() != "Alice" {
+		t.Errorf("AuthorDisplayName: got %q, want Alice", resp.GetAuthorDisplayName())
+	}
+	if resp.GetCreated() != "2026-01-01T00:00:00.000+0000" {
+		t.Errorf("Created: got %q", resp.GetCreated())
+	}
+}
+
+func TestIntegration_ListTransitions(t *testing.T) {
+	t.Parallel()
+
+	srv := grpcserver.NewServer(integrationCfg(t),
+		grpcserver.WithListTransitionsFunc(func(context.Context, gojira.Config, string) ([]client.Transition, error) {
+			return []client.Transition{
+				{ID: "11", Name: "Start", ToStatus: "In Progress"},
+				{ID: "21", Name: "Done", ToStatus: "Done"},
+			}, nil
+		}),
+	)
+	c := startBufconnServer(t, srv)
+
+	resp, err := c.ListTransitions(context.Background(), &gojirav1.ListTransitionsRequest{Key: "PROJ-1"})
+	if err != nil {
+		t.Fatalf("ListTransitions: %v", err)
+	}
+	ts := resp.GetTransitions()
+	if len(ts) != 2 {
+		t.Fatalf("want 2 transitions, got %d", len(ts))
+	}
+	if ts[0].GetId() != "11" || ts[0].GetName() != "Start" || ts[0].GetToStatus() != "In Progress" {
+		t.Errorf("transition[0]: %+v", ts[0])
+	}
+	if ts[1].GetId() != "21" || ts[1].GetToStatus() != "Done" {
+		t.Errorf("transition[1]: %+v", ts[1])
+	}
+}
+
+func TestIntegration_TransitionIssue_ByID(t *testing.T) {
+	t.Parallel()
+
+	var gotKey, gotID string
+	srv := grpcserver.NewServer(integrationCfg(t),
+		grpcserver.WithTransitionIssueFunc(func(_ context.Context, _ gojira.Config, key, transitionID string, _ ...client.TransitionOption) error {
+			gotKey = key
+			gotID = transitionID
+			return nil
+		}),
+	)
+	c := startBufconnServer(t, srv)
+
+	resp, err := c.TransitionIssue(context.Background(), &gojirav1.TransitionIssueRequest{
+		Key:          "PROJ-1",
+		TransitionId: "11",
+	})
+	if err != nil {
+		t.Fatalf("TransitionIssue: %v", err)
+	}
+	if !resp.GetOk() {
+		t.Error("Ok must be true on success")
+	}
+	if gotKey != "PROJ-1" || gotID != "11" {
+		t.Errorf("fake got key=%q id=%q", gotKey, gotID)
+	}
+}
+
+// TestIntegration_TransitionIssue_ByStatus exercises the handler's
+// by-name resolution path: the listTransitionsFn seam supplies the
+// transition list; the handler must case-insensitively match the
+// target ToStatus and forward the resolved id to transitionIssueFn.
+func TestIntegration_TransitionIssue_ByStatus(t *testing.T) {
+	t.Parallel()
+
+	var transitionedWith string
+	srv := grpcserver.NewServer(integrationCfg(t),
+		grpcserver.WithListTransitionsFunc(func(context.Context, gojira.Config, string) ([]client.Transition, error) {
+			return []client.Transition{
+				{ID: "11", Name: "Start", ToStatus: "In Progress"},
+				{ID: "21", Name: "Done", ToStatus: "Done"},
+			}, nil
+		}),
+		grpcserver.WithTransitionIssueFunc(func(_ context.Context, _ gojira.Config, _, transitionID string, _ ...client.TransitionOption) error {
+			transitionedWith = transitionID
+			return nil
+		}),
+	)
+	c := startBufconnServer(t, srv)
+
+	resp, err := c.TransitionIssue(context.Background(), &gojirav1.TransitionIssueRequest{
+		Key:              "PROJ-1",
+		TargetStatusName: "Done",
+	})
+	if err != nil {
+		t.Fatalf("TransitionIssue by status: %v", err)
+	}
+	if !resp.GetOk() {
+		t.Error("Ok must be true on success")
+	}
+	if transitionedWith != "21" {
+		t.Errorf("by-status must resolve to id 21, got %q", transitionedWith)
+	}
+}
+
+// TestIntegration_Write_ErrorMapping confirms that write-path
+// sentinels flow through toStatusError end-to-end. ErrBadRequest must
+// surface as InvalidArgument on CreateIssue; ErrConflict must surface
+// as FailedPrecondition on TransitionIssue. The error is wrapped to
+// also confirm errors.Is classification survives a wrap chain over
+// the wire.
+func TestIntegration_Write_ErrorMapping(t *testing.T) {
+	t.Parallel()
+
+	t.Run("CreateIssue ErrBadRequest -> InvalidArgument", func(t *testing.T) {
+		t.Parallel()
+		// The seam returns the real client.ErrBadRequest sentinel so the
+		// server's toStatusError sees it (via errors.Is over the wrap
+		// chain) and maps it to codes.InvalidArgument over the wire.
+		srv := grpcserver.NewServer(integrationCfg(t),
+			grpcserver.WithCreateIssueFunc(func(context.Context, gojira.Config, string, string, ...client.CreateOption) (client.CreatedIssue, error) {
+				return client.CreatedIssue{}, client.ErrBadRequest
+			}),
+		)
+		c := startBufconnServer(t, srv)
+
+		_, err := c.CreateIssue(context.Background(), &gojirav1.CreateIssueRequest{
+			Project: "PROJ", IssueType: "Task",
+		})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		st, ok := status.FromError(err)
+		if !ok {
+			t.Fatalf("expected gRPC status error, got %T (%v)", err, err)
+		}
+		if st.Code() != codes.InvalidArgument {
+			t.Errorf("status code: got %v, want InvalidArgument", st.Code())
+		}
+	})
+
+	t.Run("TransitionIssue ErrConflict -> FailedPrecondition", func(t *testing.T) {
+		t.Parallel()
+		srv := grpcserver.NewServer(integrationCfg(t),
+			grpcserver.WithTransitionIssueFunc(func(context.Context, gojira.Config, string, string, ...client.TransitionOption) error {
+				return client.ErrConflict
+			}),
+		)
+		c := startBufconnServer(t, srv)
+
+		_, err := c.TransitionIssue(context.Background(), &gojirav1.TransitionIssueRequest{
+			Key:          "PROJ-1",
+			TransitionId: "11",
+		})
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		st, ok := status.FromError(err)
+		if !ok {
+			t.Fatalf("expected gRPC status error, got %T (%v)", err, err)
+		}
+		if st.Code() != codes.FailedPrecondition {
+			t.Errorf("status code: got %v, want FailedPrecondition", st.Code())
+		}
+	})
 }

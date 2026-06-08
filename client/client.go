@@ -700,8 +700,16 @@ func (c *Client) doWithRetry(ctx context.Context, buildReq func() (*http.Request
 		case http.StatusOK, http.StatusCreated, http.StatusNoContent:
 			return resp.body, nil
 
+		// 400 and 409 carry Jira's standard error body
+		// ({"errorMessages": [...], "errors": {fieldID: msg}}). We parse
+		// it into an *APIError that Unwraps to the matching sentinel,
+		// so errors.Is still classifies the failure while errors.As
+		// exposes which fields the server rejected. parseAPIError
+		// degrades gracefully on non-JSON bodies (HTML from a WAF, an
+		// empty body) by returning an *APIError with only Status +
+		// sentinel set — classification is never lost.
 		case http.StatusBadRequest:
-			return nil, ErrBadRequest
+			return nil, parseAPIError(http.StatusBadRequest, ErrBadRequest, resp.body)
 
 		case http.StatusUnauthorized:
 			return nil, ErrUnauthorized
@@ -713,7 +721,7 @@ func (c *Client) doWithRetry(ctx context.Context, buildReq func() (*http.Request
 			return nil, ErrNotFound
 
 		case http.StatusConflict:
-			return nil, ErrConflict
+			return nil, parseAPIError(http.StatusConflict, ErrConflict, resp.body)
 
 		case http.StatusTooManyRequests:
 			if rateLimitAttempt >= c.maxRateLimitRetries {

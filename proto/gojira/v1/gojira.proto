@@ -26,6 +26,28 @@ service Gojira {
   // to the caller. Crawl content is persisted server-side via FSStore;
   // per-issue content over the wire is available on demand via GetIssue.
   rpc Crawl(CrawlRequest) returns (stream CrawlEvent);
+
+  // CreateIssue creates a new Jira issue and returns its key/id/self URL.
+  // When dry_run is set the server returns the request body it WOULD send
+  // (in dry_run_body) without contacting Jira.
+  rpc CreateIssue(CreateIssueRequest) returns (CreateIssueResponse);
+
+  // UpdateIssue edits fields on an existing issue. Honors dry_run like
+  // CreateIssue.
+  rpc UpdateIssue(UpdateIssueRequest) returns (UpdateIssueResponse);
+
+  // AddComment appends a comment (plain text, converted to ADF server-side)
+  // to an issue.
+  rpc AddComment(AddCommentRequest) returns (AddCommentResponse);
+
+  // ListTransitions lists the workflow transitions currently available for
+  // an issue (id, name, target status).
+  rpc ListTransitions(ListTransitionsRequest) returns (ListTransitionsResponse);
+
+  // TransitionIssue moves an issue through a workflow transition, selected
+  // either by transition_id or by target_status_name (resolved server-side
+  // via ListTransitions).
+  rpc TransitionIssue(TransitionIssueRequest) returns (TransitionIssueResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -494,4 +516,95 @@ message Summary {
   // duration_ms is the wall-clock time elapsed during the crawl, in
   // milliseconds.
   int64 duration_ms = 11;
+}
+
+// ---------------------------------------------------------------------------
+// Write operations (Phase 2)
+// ---------------------------------------------------------------------------
+
+// CreateIssueRequest carries the data to create a new issue. project and
+// issue_type are required; everything else is optional. Advanced or custom
+// fields that lack a dedicated slot here are supplied via raw_fields (each
+// value is a raw JSON string, mirroring the library's WithField escape hatch).
+message CreateIssueRequest {
+  string project = 1;
+  string issue_type = 2;
+  string summary = 3;
+  // description is plain text; the server converts it to ADF.
+  string description = 4;
+  repeated string labels = 5;
+  string parent_key = 6;
+  // raw_fields maps a Jira field id (e.g. "customfield_10010") to a raw JSON
+  // string value, merged into the issue "fields" object.
+  map<string, string> raw_fields = 7;
+  // dry_run, when true, makes the server return the request body it would send
+  // (in CreateIssueResponse.dry_run_body) without creating an issue.
+  bool dry_run = 8;
+}
+
+message CreateIssueResponse {
+  string key = 1;
+  string id = 2;
+  string self = 3;
+  // dry_run_body is the JSON body the server would have POSTed; set only when
+  // the request had dry_run = true (key/id/self are then empty).
+  bytes dry_run_body = 4;
+}
+
+// UpdateIssueRequest edits fields on an existing issue identified by key.
+message UpdateIssueRequest {
+  string key = 1;
+  string summary = 2;
+  string description = 3;
+  map<string, string> raw_fields = 4;
+  bool dry_run = 5;
+}
+
+message UpdateIssueResponse {
+  bool ok = 1;
+  bytes dry_run_body = 2;
+}
+
+// AddCommentRequest appends a comment to an issue. body_text is plain text,
+// converted to ADF server-side.
+message AddCommentRequest {
+  string key = 1;
+  string body_text = 2;
+}
+
+message AddCommentResponse {
+  string id = 1;
+  string author_display_name = 2;
+  string created = 3;
+}
+
+message ListTransitionsRequest {
+  string key = 1;
+}
+
+message ListTransitionsResponse {
+  repeated Transition transitions = 1;
+}
+
+// Transition is a workflow transition available for an issue.
+message Transition {
+  string id = 1;
+  string name = 2;
+  // to_status is the display name of the status the issue moves to.
+  string to_status = 3;
+}
+
+// TransitionIssueRequest moves an issue. Provide EITHER transition_id OR
+// target_status_name (the server resolves the name to an id via
+// ListTransitions). comment_text, when set, adds a comment as part of the
+// transition.
+message TransitionIssueRequest {
+  string key = 1;
+  string transition_id = 2;
+  string target_status_name = 3;
+  string comment_text = 4;
+}
+
+message TransitionIssueResponse {
+  bool ok = 1;
 }

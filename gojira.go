@@ -477,13 +477,46 @@ func FetchAndRender(ctx context.Context, cfg Config, key string, opts ...client.
 // through to the crawl orchestrator. Alternative Store implementations
 // can be injected at the crawl layer for callers that need to deliver
 // crawl output somewhere other than the local filesystem.
+//
+// # Observability
+//
+// Crawl emits no log output. To enable the structured observability
+// instrument (per-issue spans, per-phase wall-clock measurement, HTTP
+// request lifecycle traces, and the end-of-run crawl.measurement summary
+// line) use [CrawlWithLogger] instead.
 func Crawl(ctx context.Context, cfg Config, startKeys []string, sink Sink) (Summary, error) {
+	return CrawlWithLogger(ctx, cfg, startKeys, sink, nil)
+}
+
+// CrawlWithLogger is the observability-aware sibling of [Crawl]. Identical
+// behavior, plus: the supplied logger is wired through BOTH the crawl
+// orchestrator (per-issue spans, per-phase measurement, crawl.measurement
+// summary line) AND the underlying client (HTTP request lifecycle tracing
+// via internal/httplog). The two share run_id/span_id/ticket_id correlation
+// so trace_stream=stream lines and trace_stream=response lines from one
+// invocation can be joined.
+//
+// A nil logger is equivalent to calling [Crawl] — no instrumentation is
+// emitted and the on-disk behavior is unchanged. The signature is additive;
+// existing callers of Crawl are unaffected.
+//
+// See log.LevelTrace and log.ParseLevel for the level ladder, and
+// internal/trace for the correlation attribute keys (AttrRunID,
+// AttrTicketID, AttrSpanID, AttrParentSpanID, AttrPhase, AttrTraceStream).
+func CrawlWithLogger(ctx context.Context, cfg Config, startKeys []string, sink Sink, logger *slog.Logger) (Summary, error) {
 	if sink == nil {
 		sink = events.NoopSink{}
 	}
 
-	// Build the HTTP client and fetcher.
-	c, err := client.New(cfg)
+	// Build the HTTP client. When a logger is supplied, install it via
+	// client.WithLogger so HTTP requests emit the httplog RoundTripper's
+	// response-stream lines with the same correlation context the crawl
+	// orchestrator uses for stream-trace lines.
+	var clientOpts []client.Option
+	if logger != nil {
+		clientOpts = append(clientOpts, client.WithLogger(logger))
+	}
+	c, err := client.New(cfg, clientOpts...)
 	if err != nil {
 		return Summary{}, errext.Errorf("gojira: build client: %w", err)
 	}
@@ -509,7 +542,7 @@ func Crawl(ctx context.Context, cfg Config, startKeys []string, sink Sink) (Summ
 	// skip-if-exists vs. refetch. Alternative Stores (e.g. for a future
 	// service front-end) can be injected at the crawl layer.
 	store := output.NewFSStore(cfg.OutputDir, cfg.Refetch)
-	return crawl.CrawlWithEnrichers(ctx, cfg, startKeys, f, sink, hier, prs, store, nil)
+	return crawl.CrawlWithEnrichers(ctx, cfg, startKeys, f, sink, hier, prs, store, logger)
 }
 
 // ---------------------------------------------------------------------------

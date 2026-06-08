@@ -14,8 +14,12 @@
 package gojira_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -847,4 +851,116 @@ func TestGetIssue_FetchAndRenderConsistency(t *testing.T) {
 	}
 	assert.Equal(t, discoveredKeys, refKeys,
 		"GetIssue refs and FetchAndRender discoveredKeys must agree")
+}
+
+// ---------------------------------------------------------------------------
+// CrawlWithLogger — observability facade
+// ---------------------------------------------------------------------------
+
+// decodeJSONLogRecords parses each line of buf as a JSON object. Non-JSON
+// lines (or empty lines) are skipped so the test is tolerant of mixed
+// output streams.
+func decodeJSONLogRecords(t *testing.T, buf *bytes.Buffer) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	dec := json.NewDecoder(bytes.NewReader(buf.Bytes()))
+	for {
+		var rec map[string]any
+		if err := dec.Decode(&rec); err != nil {
+			if err == io.EOF {
+				break
+			}
+			// Skip any non-JSON noise rather than failing the test.
+			continue
+		}
+		out = append(out, rec)
+	}
+	return out
+}
+
+// findFirstRecord returns the first record whose msg field equals msg, or
+// nil if none is found.
+func findFirstRecord(recs []map[string]any, msg string) map[string]any {
+	for _, r := range recs {
+		if got, _ := r["msg"].(string); got == msg {
+			return r
+		}
+	}
+	return nil
+}
+
+// findAllRecords returns every record whose msg field equals msg.
+func findAllRecords(recs []map[string]any, msg string) []map[string]any {
+	var out []map[string]any
+	for _, r := range recs {
+		if got, _ := r["msg"].(string); got == msg {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// TestCrawlWithLogger_EmitsBothStreamAndResponseTraces is the end-to-end
+// observability test for the facade. It proves that a single CrawlWithLogger
+// invocation wires the supplied *slog.Logger through BOTH the crawl
+// orchestrator (trace_stream=stream lines) AND the underlying HTTP client
+// (trace_stream=response lines via the httplog round-tripper), and that
+// both streams share the same run_id correlation attribute.
+func TestCrawlWithLogger_EmitsBothStreamAndResponseTraces(t *testing.T) {
+	outputDir := t.TempDir()
+
+	// Stand up the fake Jira API using the existing helper.
+	responses := map[string][]byte{
+		"EX-1": minimalIssueJSON("EX-1", "https://example.atlassian.net"),
+	}
+	srv := issueServer(t, responses, nil)
+
+	// Capture log output via a JSON handler at slog.LevelInfo. INFO is the
+	// floor that emits crawl.start / crawl.end / crawl.measurement (stream)
+	// and http.response (response).
+	var buf bytes.Buffer
+	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})
+	lg := slog.New(handler)
+
+	cfg := testConfig(t, srv.URL, outputDir)
+	ctx := context.Background()
+
+	sum, err := gojira.CrawlWithLogger(ctx, cfg, []string{"EX-1"}, nil, lg)
+	require.NoError(t, err, "CrawlWithLogger")
+	assert.Equal(t, 1, sum.Fetched, "Summary.Fetched")
+
+	recs := decodeJSONLogRecords(t, &buf)
+	require.NotEmpty(t, recs, "expected captured log records, got 0")
+
+	// Stream side: crawl.start emitted by the orchestrator.
+	crawlStart := findFirstRecord(recs, "crawl.start")
+	require.NotNil(t, crawlStart, "missing crawl.start record")
+	assert.Equal(t, "stream", crawlStart["trace_stream"],
+		"crawl.start.trace_stream")
+
+	// Response side: at least one http.response emitted by the round-tripper.
+	httpResp := findFirstRecord(recs, "http.response")
+	require.NotNil(t, httpResp, "missing http.response record")
+	assert.Equal(t, "response", httpResp["trace_stream"],
+		"http.response.trace_stream")
+
+	// Correlation: both streams must share the same run_id from the same
+	// invocation.
+	streamRunID, _ := crawlStart["run_id"].(string)
+	responseRunID, _ := httpResp["run_id"].(string)
+	require.NotEmpty(t, streamRunID, "crawl.start.run_id must be set")
+	require.NotEmpty(t, responseRunID, "http.response.run_id must be set")
+	assert.Equal(t, streamRunID, responseRunID,
+		"stream and response runs must share run_id")
+
+	// Measurement summary: one crawl.measurement INFO line at end of run
+	// carrying call_counts and total_api_time_ms.
+	measurements := findAllRecords(recs, "crawl.measurement")
+	require.Len(t, measurements, 1,
+		"expected exactly one crawl.measurement record")
+	m := measurements[0]
+	assert.Contains(t, m, "call_counts",
+		"crawl.measurement must carry call_counts")
+	assert.Contains(t, m, "total_api_time_ms",
+		"crawl.measurement must carry total_api_time_ms")
 }

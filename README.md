@@ -285,6 +285,80 @@ The four named library capabilities (`Classify`, `LoadConfig`,
 `Summary`, `Sink`, and `Event` are documented in
 [`gojira.go`](./gojira.go)'s package doc.
 
+## Observability and tracing
+
+`gojira crawl` ships a verbose, structured, correlatable observability
+instrument designed for answering "where did the wall-clock go?" on a large
+crawl. It's measurement-first: enabling it does not change traversal,
+fetch logic, or on-disk output — only what is observed.
+
+### Levels
+
+`gojira` extends slog's standard four levels (`error`, `warn`, `info`, `debug`)
+with a fifth, `trace`. The five levels carry intent-based meaning:
+
+| Level | Meaning |
+| ----- | ------- |
+| `error` | Failures. |
+| `warn` | Degraded enrichment, partial failures. |
+| `info` | Operationally significant facts and all measurement data — phase/issue spans, per-HTTP-request summaries, the end-of-run `crawl.measurement` totals. A normal `--log-level info` run already shows time attribution. |
+| `debug` | Durable diagnostics worth keeping even after a problem is solved — resolved state and decisions (skip-if-exists hits, epic-link field resolution). |
+| `trace` | Traceability woven into the code — span lifecycles, the "because X therefore Y" fan-out reasoning, raw response bodies and full `net/http/httptrace` timings. |
+
+Select with `--log-level trace` or `GOJIRA_LOG_LEVEL=trace`. Use `--log-format json`
+to get machine-filterable JSON lines (one record per line).
+
+### Correlation attributes
+
+Every traced log line carries structured attributes so a single grep/jq
+filter can reconstruct any subset of the run's work:
+
+| Attribute | Meaning |
+| --------- | ------- |
+| `run_id` | Opaque short UID for this crawl invocation; on every line. |
+| `ticket_id` | Jira issue key (e.g. `PLATENG-1417`) — named to mirror Jira. Present on every line whose work concerns a specific issue. |
+| `span_id` / `parent_span_id` | Opaque short IDs per unit of work, linking each unit to whoever enqueued it. Opaque, not hierarchical, because crawls can bleed across projects or boards. |
+| `phase` | One of `fetch`, `parse`, `hierarchy_jql`, `dev_status`, `render`, `store`, `enqueue`. |
+| `trace_stream` | `response` (HTTP/data side, from the round-tripper) or `stream` (orchestration side, from the crawl). |
+| `depth`, `discovered_from`, `relation` | Fan-out lineage — present on `crawl.fanout` TRACE lines explaining why a key entered the queue. |
+
+### Measurement summary
+
+At end of run, `gojira crawl` emits a single INFO `crawl.measurement` line
+with the per-phase wall-clock attribution:
+
+```json
+{"msg":"crawl.measurement","total_api_time_ms":31872,"total_duration_ms":32114,"call_counts":{"fetch":48,"parse":48,"hierarchy_jql":12,"dev_status":48,"render":48,"store":48},"time_by_phase_ms":{"fetch":18204,"hierarchy_jql":7411,"dev_status":4012,"parse":612,"render":1031,"store":602}}
+```
+
+The same totals are also folded into the [`crawl.Summary`](./gojira.go)
+returned to library callers as `APICallCounts`, `APITimeByPhase`, and
+`TotalAPITime`.
+
+### Filtering examples
+
+```bash
+# All response-stream traces for one issue:
+gojira crawl PLATENG-1417 --log-level trace --log-format json 2>&1 \
+  | jq 'select(.trace_stream=="response" and .ticket_id=="PLATENG-1417")'
+
+# Only the per-phase measurement summary:
+gojira crawl PLATENG-1417 --log-level info --log-format json 2>&1 \
+  | jq 'select(.msg=="crawl.measurement")'
+
+# Reconstruct the fan-out tree (TRACE):
+gojira crawl PLATENG-1417 --log-level trace --log-format json 2>&1 \
+  | jq 'select(.msg=="crawl.fanout") | "\(.discovered_from) -[\(.relation)]-> \(.ticket_id)"'
+```
+
+### Credential redaction
+
+`Authorization`, `Cookie`, `Proxy-Authorization`, `Set-Cookie`, and
+`X-Atlassian-Token` headers are ALWAYS redacted in trace output, even at
+`--log-level trace`. The raw token is never written to logs by design;
+the redaction is audited by a unit test
+(`TestRoundTripper_RedactsAuthorizationEvenAtTrace`).
+
 ## gRPC service (`gojira serve`)
 
 In addition to the one-shot `crawl` subcommand, gojira can run as a
@@ -405,6 +479,10 @@ the proto contract, run [buf](https://buf.build):
 - gRPC write operations (`CreateIssue`/`UpdateIssue`/`AddComment`/
   `TransitionIssue`) use the server's single startup identity; per-request
   credentials are deferred to a later phase. Issue deletion is not supported.
+- Observability and tracing (`--log-level trace`) is opt-in; default `info`
+  already shows the end-of-run measurement summary. Cross-process tracing
+  (e.g. OpenTelemetry export across the gRPC boundary) is out of scope for
+  this release.
 
 ## Roadmap
 

@@ -143,6 +143,20 @@ create/update, and surface Jira field-level validation errors. Issue deletion
 is intentionally unsupported. Per AGENTS guardrails, treat write operations as
 mutating actions.
 
+### Observability and tracing
+
+`gojira crawl` supports a five-level log ladder (`error`/`warn`/`info`/
+`debug`/`trace`) with intent-based meanings: `info` carries operationally
+significant facts and all measurement data, `debug` carries durable
+diagnostics, and `trace` is traceability (span lifecycles, raw payloads,
+fan-out lineage). Use `--log-level trace --log-format json` for filterable
+machine output. Authorization headers and any token are absolutely never
+logged, even at trace. The crawl emits a `crawl.measurement` INFO line at
+end of run with per-phase wall-clock attribution.
+
+When implementing or testing observability-adjacent code: never log a token
+or credential — the redaction is a hard rule; raw response bodies are safe.
+
 ## AiderDesk workflow
 
 Use small, focused implementation slices.

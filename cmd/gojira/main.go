@@ -340,6 +340,7 @@ Exit codes:
   130 Force-quit by second signal.`,
 		Commands: []*cli.Command{
 			crawlCommand(env, signalled),
+			serveCommand(env, signalled),
 		},
 		// We map errors to exit codes ourselves in run(); cli's default
 		// would call HandleExitCoder which may os.Exit. Suppress it.

@@ -45,6 +45,16 @@ var (
 	// ErrRateLimited is returned when the server responds with 429 and
 	// all retry attempts are exhausted.
 	ErrRateLimited = errors.New("client: rate limited (429) after retries")
+
+	// ErrBadRequest is returned when the server responds with 400. The
+	// returned error may be a *APIError carrying Jira's per-field error
+	// details (see phase-a-transport-2); callers can still match it with
+	// errors.Is(err, ErrBadRequest).
+	ErrBadRequest = errors.New("client: bad request (400)")
+
+	// ErrConflict is returned when the server responds with 409, e.g. an
+	// invalid workflow transition.
+	ErrConflict = errors.New("client: conflict (409)")
 )
 
 // userAgent is sent on every request.
@@ -625,6 +635,24 @@ func (c *Client) newPostJSON(ctx context.Context, rawURL string, body []byte) (*
 	return req, nil
 }
 
+// newPutJSON constructs an authenticated PUT request with a JSON body.
+// It is the sibling of [newPostJSON] for endpoints that take a PUT —
+// Jira's `PUT /rest/api/3/issue/<key>` (edit issue) is the immediate
+// caller in the Phase 2 write surface. Like newPostJSON, the body is
+// wrapped in a fresh bytes.Reader so each retry attempt can re-read
+// it from the start.
+func (c *Client) newPutJSON(ctx context.Context, rawURL string, body []byte) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, rawURL, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", c.authHeader)
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	return req, nil
+}
+
 // rawResponse carries the parts of an HTTP response the retry loop needs.
 type rawResponse struct {
 	status     int
@@ -663,8 +691,17 @@ func (c *Client) doWithRetry(ctx context.Context, buildReq func() (*http.Request
 
 		// --- HTTP status handling ---
 		switch resp.status {
-		case http.StatusOK:
+		// 200 OK is the historical read-path success. 201 Created and
+		// 204 No Content cover the Phase 2 write paths: CreateIssue
+		// returns 201 with a {id,key,self} body, UpdateIssue and
+		// TransitionIssue return 204 with no body. Returning resp.body
+		// for 204 is safe — it is just an empty byte slice that
+		// write-method callers ignore.
+		case http.StatusOK, http.StatusCreated, http.StatusNoContent:
 			return resp.body, nil
+
+		case http.StatusBadRequest:
+			return nil, ErrBadRequest
 
 		case http.StatusUnauthorized:
 			return nil, ErrUnauthorized
@@ -674,6 +711,9 @@ func (c *Client) doWithRetry(ctx context.Context, buildReq func() (*http.Request
 
 		case http.StatusNotFound:
 			return nil, ErrNotFound
+
+		case http.StatusConflict:
+			return nil, ErrConflict
 
 		case http.StatusTooManyRequests:
 			if rateLimitAttempt >= c.maxRateLimitRetries {

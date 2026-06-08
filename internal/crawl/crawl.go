@@ -149,6 +149,21 @@ type Summary struct {
 
 	// Duration is the wall-clock time elapsed during the crawl.
 	Duration time.Duration
+
+	// APICallCounts maps a phase label (fetch, hierarchy_jql, dev_status,
+	// parse, render, store) to the number of times that phase ran across the
+	// entire crawl. Surfaced for measurement attribution; not a stability
+	// contract for downstream consumers.
+	APICallCounts map[string]int
+
+	// APITimeByPhase maps the same phase labels to the total wall-clock time
+	// spent in that phase across the crawl. Useful for answering "where did
+	// the 32s go?".
+	APITimeByPhase map[string]time.Duration
+
+	// TotalAPITime is the sum of APITimeByPhase values — total wall-clock
+	// time spent in any instrumented phase across all issues, summed.
+	TotalAPITime time.Duration
 }
 
 // workItem is a single unit of work in the crawl queue.
@@ -215,17 +230,22 @@ type crawler struct {
 	abortOnce sync.Once
 
 	// logger is the orchestrator's slog sink. It is always non-nil
-	// after construction (defaulting to [noopLogger]) so emission sites
-	// can call c.logger.LogAttrs unconditionally. A real (non-noop)
-	// logger is installed by [CrawlWithEnrichers] via the
-	// [defaultCrawlerLogger] seam, which production wires to noop and
-	// tests override to capture span output.
+	// after construction (defaulting to [noopLogger] when the caller
+	// of [CrawlWithEnrichers] passes nil) so emission sites can call
+	// c.logger.LogAttrs unconditionally.
 	logger *slog.Logger
 
 	// rootSpan identifies this crawl run. Every span instrumented by the
 	// orchestrator is a descendant of rootSpan. Created once in
 	// [CrawlWithEnrichers]; immutable for the lifetime of the run.
 	rootSpan trace.Span
+
+	// phaseMu protects phaseCounts and phaseDurations from concurrent
+	// updates by parallel workers. Read at end-of-crawl to fold into
+	// Summary.
+	phaseMu        sync.Mutex
+	phaseCounts    map[string]int
+	phaseDurations map[string]time.Duration
 }
 
 // noopLogger returns a [*slog.Logger] whose handler always returns false
@@ -247,17 +267,25 @@ func (noopHandler) Handle(context.Context, slog.Record) error { return nil }
 func (noopHandler) WithAttrs([]slog.Attr) slog.Handler        { return noopHandler{} }
 func (noopHandler) WithGroup(string) slog.Handler             { return noopHandler{} }
 
-// defaultCrawlerLogger is the package-level seam used by
-// [CrawlWithEnrichers] to obtain the crawler's base logger. Production
-// returns [noopLogger] so the orchestrator emits nothing and existing
-// callers/on-disk results are byte-identical. White-box tests
-// (crawl_internal_test.go) override this to inject a real
-// [*slog.Logger] that captures span output to a [bytes.Buffer].
-//
-// This indirection is a deliberate stop-gap for phase-d-thread-2: the
-// next task (phase-d-thread-3) widens [CrawlWithEnrichers]' signature
-// with an explicit logger parameter and removes the seam.
-var defaultCrawlerLogger = noopLogger
+// recordPhase aggregates a single phase invocation's wall-clock cost into the
+// crawler's running tallies. Safe under concurrent invocation by multiple
+// workers.
+func (c *crawler) recordPhase(phase string, d time.Duration) {
+	c.phaseMu.Lock()
+	c.phaseCounts[phase]++
+	c.phaseDurations[phase] += d
+	c.phaseMu.Unlock()
+}
+
+// durationMsMap converts a map of phase→Duration into a map of phase→int64 ms
+// for log-friendly emission.
+func durationMsMap(in map[string]time.Duration) map[string]int64 {
+	out := make(map[string]int64, len(in))
+	for k, v := range in {
+		out[k] = v.Milliseconds()
+	}
+	return out
+}
 
 // closeQueueLocked closes the work queue. Must be called with c.mu held.
 // It is a no-op if the queue is already closed.
@@ -408,12 +436,14 @@ func (c *crawler) processIssue(item workItem) error {
 			slog.String(trace.AttrTicketID, key),
 		)
 		raw, fetchErr = c.fetcher.Fetch(fctx, key)
+		fdur := time.Since(fstart)
 		fl.LogAttrs(fctx, slog.LevelInfo, "phase.end",
 			slog.String(trace.AttrPhase, trace.PhaseFetch),
 			slog.String(trace.AttrTicketID, key),
-			slog.Int64("duration_ms", time.Since(fstart).Milliseconds()),
+			slog.Int64("duration_ms", fdur.Milliseconds()),
 			slog.Bool("ok", fetchErr == nil),
 		)
+		c.recordPhase(trace.PhaseFetch, fdur)
 	}
 	if fetchErr != nil {
 		return c.handleFetchError(key, fetchErr)
@@ -424,12 +454,14 @@ func (c *crawler) processIssue(item workItem) error {
 	// enough; parse is fast and synchronous.
 	pstart := time.Now()
 	issue, parseErr := parse.Parse(raw, c.cfg.Site)
+	pdur := time.Since(pstart)
 	spanLogger.LogAttrs(ctx, slog.LevelInfo, "phase.end",
 		slog.String(trace.AttrPhase, trace.PhaseParse),
 		slog.String(trace.AttrTicketID, key),
-		slog.Int64("duration_ms", time.Since(pstart).Milliseconds()),
+		slog.Int64("duration_ms", pdur.Milliseconds()),
 		slog.Bool("ok", parseErr == nil),
 	)
+	c.recordPhase(trace.PhaseParse, pdur)
 	if parseErr != nil {
 		reason := fmt.Sprintf("parse error: %v", parseErr)
 		c.sink.Emit(events.Event{
@@ -487,12 +519,14 @@ func (c *crawler) processIssue(item workItem) error {
 			slog.String(trace.AttrTicketID, key),
 		)
 		discovered, err := c.hier.Children(hctx, issue)
+		hdur := time.Since(hstart)
 		hl.LogAttrs(hctx, slog.LevelInfo, "phase.end",
 			slog.String(trace.AttrPhase, trace.PhaseHierarchyJQL),
 			slog.String(trace.AttrTicketID, key),
-			slog.Int64("duration_ms", time.Since(hstart).Milliseconds()),
+			slog.Int64("duration_ms", hdur.Milliseconds()),
 			slog.Bool("ok", err == nil),
 		)
+		c.recordPhase(trace.PhaseHierarchyJQL, hdur)
 		if err != nil {
 			// Non-fatal: the issue itself is rendered; we just missed
 			// (some of) its children. Emit a failure event so operators
@@ -546,12 +580,14 @@ func (c *crawler) processIssue(item workItem) error {
 			slog.String(trace.AttrTicketID, key),
 		)
 		discovered, err := c.devStatus.Enrich(dctx, issue)
+		ddur := time.Since(dstart)
 		dl.LogAttrs(dctx, slog.LevelInfo, "phase.end",
 			slog.String(trace.AttrPhase, trace.PhaseDevStatus),
 			slog.String(trace.AttrTicketID, key),
-			slog.Int64("duration_ms", time.Since(dstart).Milliseconds()),
+			slog.Int64("duration_ms", ddur.Milliseconds()),
 			slog.Bool("ok", err == nil),
 		)
+		c.recordPhase(trace.PhaseDevStatus, ddur)
 		if err != nil {
 			msg := fmt.Sprintf("dev status enrichment partially failed for %s: %v", key, err)
 			if !hasAnyDevStatusEntity(discovered) {
@@ -614,12 +650,14 @@ func (c *crawler) processIssue(item workItem) error {
 	// (false) drops them to reduce noise.
 	rstart := time.Now()
 	indexMD, renderErr := render.RenderIssue(issue, neighbours, c.cfg.RenderNullCustomFields)
+	rdur := time.Since(rstart)
 	spanLogger.LogAttrs(ctx, slog.LevelInfo, "phase.end",
 		slog.String(trace.AttrPhase, trace.PhaseRender),
 		slog.String(trace.AttrTicketID, key),
-		slog.Int64("duration_ms", time.Since(rstart).Milliseconds()),
+		slog.Int64("duration_ms", rdur.Milliseconds()),
 		slog.Bool("ok", renderErr == nil),
 	)
+	c.recordPhase(trace.PhaseRender, rdur)
 	if renderErr != nil {
 		reason := fmt.Sprintf("render error: %v", renderErr)
 		c.sink.Emit(events.Event{
@@ -663,12 +701,14 @@ func (c *crawler) processIssue(item workItem) error {
 		slog.String(trace.AttrTicketID, key),
 	)
 	writeErr := c.store.Write(sctx, key, indexMD, outboundMD)
+	sdur := time.Since(sstart)
 	sl.LogAttrs(sctx, slog.LevelInfo, "phase.end",
 		slog.String(trace.AttrPhase, trace.PhaseStore),
 		slog.String(trace.AttrTicketID, key),
-		slog.Int64("duration_ms", time.Since(sstart).Milliseconds()),
+		slog.Int64("duration_ms", sdur.Milliseconds()),
 		slog.Bool("ok", writeErr == nil),
 	)
+	c.recordPhase(trace.PhaseStore, sdur)
 	if writeErr != nil {
 		if errors.Is(writeErr, output.ErrAlreadyExists) {
 			// Race: another goroutine wrote this key between our probe
@@ -988,7 +1028,7 @@ func CrawlWithDiscoverer(
 	sink events.Sink,
 	hier ChildDiscoverer,
 ) (Summary, error) {
-	return CrawlWithEnrichers(ctx, cfg, startKeys, fetcher, sink, hier, nil, nil)
+	return CrawlWithEnrichers(ctx, cfg, startKeys, fetcher, sink, hier, nil, nil, nil)
 }
 
 // CrawlWithEnrichers is the extended entry point that accepts both a
@@ -1010,6 +1050,14 @@ func CrawlWithDiscoverer(
 // non-filesystem destination (e.g. an in-memory buffer or a future
 // service front-end).
 //
+// The logger parameter is additive over the previous signature: it is
+// the orchestrator's [*slog.Logger] sink for the structured span
+// instrumentation (crawl.start / issue.process.start / phase.* /
+// issue.process.end / crawl.end / crawl.measurement). Passing nil
+// defaults to a no-op logger, preserving the prior behavior of
+// emitting nothing for callers that have not yet adopted the
+// observability instrument.
+//
 // The signature is additive over [CrawlWithDiscoverer]; existing
 // callers that only need hierarchy expansion are unaffected.
 func CrawlWithEnrichers(
@@ -1021,7 +1069,15 @@ func CrawlWithEnrichers(
 	hier ChildDiscoverer,
 	devStatus DevStatusEnricher,
 	store output.Store,
+	logger *slog.Logger,
 ) (Summary, error) {
+	// When the caller passes a nil logger, default to a no-op handler so the
+	// rest of the orchestrator can emit unconditionally. This preserves the
+	// historical no-output behavior for callers that have not adopted the
+	// observability instrument.
+	if logger == nil {
+		logger = noopLogger()
+	}
 	// When the caller passes a nil store, default to an FSStore rooted
 	// at cfg.OutputDir, preserving the historical on-disk behavior.
 	if store == nil {
@@ -1049,26 +1105,28 @@ func CrawlWithEnrichers(
 	}
 
 	c := &crawler{
-		cfg:         cfg,
-		fetcher:     fetcher,
-		sink:        sink,
-		store:       store,
-		hier:        hier,
-		devStatus:   devStatus,
-		crawlCtx:    crawlCtx,
-		cancelCrawl: cancelCrawl,
-		visited:     make(map[string]bool),
-		seenPRs:     make(map[string]bool),
-		summary:     Summary{FailedKeys: make(map[string]string)},
-		queue:       make(chan workItem, queueBuf),
-		logger:      defaultCrawlerLogger(),
+		cfg:            cfg,
+		fetcher:        fetcher,
+		sink:           sink,
+		store:          store,
+		hier:           hier,
+		devStatus:      devStatus,
+		crawlCtx:       crawlCtx,
+		cancelCrawl:    cancelCrawl,
+		visited:        make(map[string]bool),
+		seenPRs:        make(map[string]bool),
+		summary:        Summary{FailedKeys: make(map[string]string)},
+		queue:          make(chan workItem, queueBuf),
+		logger:         logger,
+		phaseCounts:    make(map[string]int),
+		phaseDurations: make(map[string]time.Duration),
 	}
 	// Tag every record emitted by the orchestrator with
 	// trace_stream=stream so a consumer can distinguish orchestration
 	// lines from the HTTP RoundTripper's response-stream lines (which
 	// stamp trace_stream=response). The .With is harmless on a noop
-	// handler and meaningful on any real handler installed by tests
-	// or by phase-d-thread-3.
+	// handler and meaningful on any real handler installed by the
+	// caller.
 	c.logger = c.logger.With(trace.AttrTraceStream, trace.StreamStream)
 	// rootSpan is created exactly once and identifies the whole run.
 	// Every per-issue span is a child of rootSpan via [Span.Child].
@@ -1165,6 +1223,35 @@ func CrawlWithEnrichers(
 	sort.Strings(c.summary.CapLimitedKeys)
 
 	c.summary.Duration = time.Since(start)
+
+	// Fold per-phase tallies into Summary and emit a single INFO
+	// measurement line so a normal --log-level info run already shows
+	// time attribution. The maps are lazy-allocated: when no phase ran
+	// (e.g. a zero-seed crawl) the Summary's new fields stay nil so the
+	// zero-value Summary{} continues to compare equal to a real
+	// no-phase Summary.
+	c.phaseMu.Lock()
+	var totalAPI time.Duration
+	if len(c.phaseCounts) > 0 {
+		c.summary.APICallCounts = make(map[string]int, len(c.phaseCounts))
+		c.summary.APITimeByPhase = make(map[string]time.Duration, len(c.phaseDurations))
+		for k, v := range c.phaseCounts {
+			c.summary.APICallCounts[k] = v
+		}
+		for k, v := range c.phaseDurations {
+			c.summary.APITimeByPhase[k] = v
+			totalAPI += v
+		}
+		c.summary.TotalAPITime = totalAPI
+	}
+	c.phaseMu.Unlock()
+
+	c.logger.LogAttrs(crawlCtx, slog.LevelInfo, "crawl.measurement",
+		slog.Int64("total_api_time_ms", totalAPI.Milliseconds()),
+		slog.Int64("total_duration_ms", time.Since(start).Milliseconds()),
+		slog.Any("call_counts", c.summary.APICallCounts),
+		slog.Any("time_by_phase_ms", durationMsMap(c.summary.APITimeByPhase)),
+	)
 
 	// Emit crawl summary event. The Message string is preserved verbatim
 	// for text-only consumers (slog sink, RecordingSink dumps, etc.); the

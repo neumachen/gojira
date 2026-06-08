@@ -509,7 +509,7 @@ func Crawl(ctx context.Context, cfg Config, startKeys []string, sink Sink) (Summ
 	// skip-if-exists vs. refetch. Alternative Stores (e.g. for a future
 	// service front-end) can be injected at the crawl layer.
 	store := output.NewFSStore(cfg.OutputDir, cfg.Refetch)
-	return crawl.CrawlWithEnrichers(ctx, cfg, startKeys, f, sink, hier, prs, store)
+	return crawl.CrawlWithEnrichers(ctx, cfg, startKeys, f, sink, hier, prs, store, nil)
 }
 
 // ---------------------------------------------------------------------------

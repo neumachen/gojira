@@ -2,11 +2,15 @@
 // server, intended as a smoke / interoperability tool, not a production
 // frontend.
 //
-// It exercises three RPCs:
+// It exercises the gojira.v1 service surface:
 //
-//   - Classify  — pass any URL or bare issue key via -classify.
-//   - GetIssue  — pass an issue key via -key (with -format=markdown|json|structured).
-//   - Crawl     — pass one or more start keys as positional args, or via -crawl.
+//   - Classify         — pass any URL or bare issue key via -classify.
+//   - GetIssue         — pass an issue key via -key (with -format=markdown|json|structured).
+//   - Crawl            — pass one or more start keys as positional args, or via -crawl.
+//   - CreateIssue      — -create-project/-create-type/-create-summary (with -dry-run).
+//   - AddComment       — -comment with -comment-text.
+//   - ListTransitions  — -transitions <KEY>.
+//   - TransitionIssue  — -transition <KEY> with either -transition-id or -to-status.
 //
 // The client dials over plaintext (insecure credentials) because the
 // Phase-1 server scope is the loopback interface on a trusted host;
@@ -17,6 +21,10 @@
 //	gojira-client -address 127.0.0.1:50051 -classify EXAMPLE-1
 //	gojira-client -key EXAMPLE-1 -format markdown
 //	gojira-client -crawl EXAMPLE-1
+//	gojira-client -create-project PROJ -create-type Task -create-summary "fix it" -dry-run
+//	gojira-client -comment PROJ-1 -comment-text "looks good"
+//	gojira-client -transitions PROJ-1
+//	gojira-client -transition PROJ-1 -to-status Done
 //
 // Errors abort the process with log.Fatal; a non-zero exit code is the
 // only failure signal.
@@ -44,6 +52,23 @@ func main() {
 	getIssueKey := flag.String("key", "", "issue key to fetch via GetIssue")
 	format := flag.String("format", "markdown", "GetIssue output format: markdown|json|structured")
 	crawlSeed := flag.String("crawl", "", "comma-separated start keys for a streaming Crawl")
+
+	// Write subcommands. Each is opt-in: pass the corresponding flag(s)
+	// and the binary dispatches to that RPC. Mutually exclusive in the
+	// switch below — the first non-empty trigger wins, in order:
+	// classify, key, crawl, create-summary, comment, transitions,
+	// transition.
+	createProject := flag.String("create-project", "", "project key for CreateIssue")
+	createType := flag.String("create-type", "Task", "issue type for CreateIssue")
+	createSummary := flag.String("create-summary", "", "summary for CreateIssue (presence triggers CreateIssue)")
+	createDesc := flag.String("create-description", "", "optional description text for CreateIssue")
+	commentKey := flag.String("comment", "", "issue key to add a comment to")
+	commentText := flag.String("comment-text", "", "comment body text")
+	transitionsKey := flag.String("transitions", "", "issue key to list transitions for")
+	transitionKey := flag.String("transition", "", "issue key to transition")
+	transitionID := flag.String("transition-id", "", "transition id (use with -transition)")
+	transitionToStatus := flag.String("to-status", "", "target status name (use with -transition; resolved server-side)")
+	dryRun := flag.Bool("dry-run", false, "for create: ask the server to return the request body without creating")
 	flag.Parse()
 
 	conn, err := grpc.NewClient(*address, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -70,6 +95,26 @@ func main() {
 		keys := collectCrawlKeys(*crawlSeed, flag.Args())
 		if err := doCrawl(ctx, client, keys, os.Stdout); err != nil {
 			log.Fatalf("crawl: %v", err)
+		}
+
+	case *createSummary != "":
+		if err := doCreateIssue(ctx, client, *createProject, *createType, *createSummary, *createDesc, *dryRun, os.Stdout); err != nil {
+			log.Fatalf("create issue: %v", err)
+		}
+
+	case *commentKey != "":
+		if err := doAddComment(ctx, client, *commentKey, *commentText, os.Stdout); err != nil {
+			log.Fatalf("add comment: %v", err)
+		}
+
+	case *transitionsKey != "":
+		if err := doListTransitions(ctx, client, *transitionsKey, os.Stdout); err != nil {
+			log.Fatalf("list transitions: %v", err)
+		}
+
+	case *transitionKey != "":
+		if err := doTransition(ctx, client, *transitionKey, *transitionID, *transitionToStatus, os.Stdout); err != nil {
+			log.Fatalf("transition: %v", err)
 		}
 
 	default:
@@ -171,4 +216,80 @@ func parseOutputFormat(s string) gojirav1.OutputFormat {
 	default:
 		return gojirav1.OutputFormat_OUTPUT_FORMAT_STRUCTURED
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Write subcommands (Phase 2)
+// ---------------------------------------------------------------------------
+
+// doCreateIssue invokes CreateIssue with the supplied project/type/summary
+// (and optional description). When dryRun is true the server returns the
+// JSON body it would have POSTed and the client prints it instead of the
+// usual key/id/self triplet.
+func doCreateIssue(ctx context.Context, client gojirav1.GojiraClient, project, issueType, summary, description string, dryRun bool, out io.Writer) error {
+	resp, err := client.CreateIssue(ctx, &gojirav1.CreateIssueRequest{
+		Project:     project,
+		IssueType:   issueType,
+		Summary:     summary,
+		Description: description,
+		DryRun:      dryRun,
+	})
+	if err != nil {
+		return err
+	}
+	if dryRun {
+		fmt.Fprintf(out, "DryRun body:\n%s\n", string(resp.GetDryRunBody()))
+		return nil
+	}
+	fmt.Fprintf(out, "Key:  %s\n", resp.GetKey())
+	fmt.Fprintf(out, "ID:   %s\n", resp.GetId())
+	fmt.Fprintf(out, "Self: %s\n", resp.GetSelf())
+	return nil
+}
+
+// doAddComment invokes AddComment with a plain-text body. The server
+// converts the text to ADF; the printed response is Jira's id + author
+// + timestamp.
+func doAddComment(ctx context.Context, client gojirav1.GojiraClient, key, text string, out io.Writer) error {
+	resp, err := client.AddComment(ctx, &gojirav1.AddCommentRequest{
+		Key:      key,
+		BodyText: text,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "ID:     %s\n", resp.GetId())
+	fmt.Fprintf(out, "Author: %s\n", resp.GetAuthorDisplayName())
+	fmt.Fprintf(out, "Time:   %s\n", resp.GetCreated())
+	return nil
+}
+
+// doListTransitions invokes ListTransitions and prints each available
+// transition as id/name/to-status. The set is workflow-state dependent;
+// Jira only returns transitions whose preconditions are met.
+func doListTransitions(ctx context.Context, client gojirav1.GojiraClient, key string, out io.Writer) error {
+	resp, err := client.ListTransitions(ctx, &gojirav1.ListTransitionsRequest{Key: key})
+	if err != nil {
+		return err
+	}
+	for _, t := range resp.GetTransitions() {
+		fmt.Fprintf(out, "%s\t%s\t->\t%s\n", t.GetId(), t.GetName(), t.GetToStatus())
+	}
+	return nil
+}
+
+// doTransition invokes TransitionIssue. Provide EITHER transitionID OR
+// toStatus (case-insensitive name resolution happens server-side via
+// the same ListTransitions endpoint).
+func doTransition(ctx context.Context, client gojirav1.GojiraClient, key, transitionID, toStatus string, out io.Writer) error {
+	resp, err := client.TransitionIssue(ctx, &gojirav1.TransitionIssueRequest{
+		Key:              key,
+		TransitionId:     transitionID,
+		TargetStatusName: toStatus,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "ok: %v\n", resp.GetOk())
+	return nil
 }

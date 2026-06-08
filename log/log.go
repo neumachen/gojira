@@ -93,10 +93,24 @@ func ParseFormat(s string) (Format, error) {
 // both [NewTextHandler] and [NewJSONHandler]. AddSource is left
 // false: file:line information is noisy for routine logging and
 // errors already carry their own stack frames via errext.
+//
+// The ReplaceAttr below is a single, targeted shim: it rewrites the
+// level field for [LevelTrace] records from slog's default
+// "DEBUG-4" rendering to the human-readable "TRACE". Every other
+// level (Debug/Info/Warn/Error) flows through untouched, so this
+// keeps the existing log surface byte-identical for non-trace runs.
 func handlerOptions(level slog.Level) *slog.HandlerOptions {
 	return &slog.HandlerOptions{
 		Level:     level,
 		AddSource: false,
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.LevelKey {
+				if lv, ok := a.Value.Any().(slog.Level); ok && lv == LevelTrace {
+					a.Value = slog.StringValue("TRACE")
+				}
+			}
+			return a
+		},
 	}
 }
 

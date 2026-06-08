@@ -849,7 +849,7 @@ func TestCrawl_DevStatusPartialFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	sum, err := CrawlWithEnrichers(ctx, cfg, []string{"EXAMPLE-1"}, ff, sink, nil, enricher, nil)
+	sum, err := CrawlWithEnrichers(ctx, cfg, []string{"EXAMPLE-1"}, ff, sink, nil, enricher, nil, nil)
 	require.NoError(t, err, "Crawl must not return a fatal error for a partial enrichment failure")
 
 	// Summary semantics: the issue was rendered, NOT failed.
@@ -929,7 +929,7 @@ func TestCrawl_InjectedStore(t *testing.T) {
 		store := &recordingStore{}
 
 		ctx := context.Background()
-		sum, err := CrawlWithEnrichers(ctx, cfg, []string{"EXAMPLE-1"}, ff, sink, nil, nil, store)
+		sum, err := CrawlWithEnrichers(ctx, cfg, []string{"EXAMPLE-1"}, ff, sink, nil, nil, store, nil)
 		require.NoError(t, err)
 		assert.Equal(t, 1, sum.Fetched, "Fetched")
 		assert.Equal(t, 0, sum.Failed, "Failed")
@@ -952,7 +952,7 @@ func TestCrawl_InjectedStore(t *testing.T) {
 		sink := &events.RecordingSink{}
 
 		ctx := context.Background()
-		sum, err := CrawlWithEnrichers(ctx, cfg, []string{"EXAMPLE-1"}, ff, sink, nil, nil, nil)
+		sum, err := CrawlWithEnrichers(ctx, cfg, []string{"EXAMPLE-1"}, ff, sink, nil, nil, nil, nil)
 		require.NoError(t, err)
 		assert.Equal(t, 1, sum.Fetched, "Fetched")
 

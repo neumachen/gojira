@@ -104,21 +104,21 @@ func findAllByMsg(records []map[string]any, msg string) []map[string]any {
 	return out
 }
 
-// withInjectedLogger runs CrawlWithEnrichers under a tiny harness that
-// (a) constructs a sink, (b) registers an "after construct" hook to
-// overwrite the crawler's logger BEFORE workers spawn. Since
-// CrawlWithEnrichers does not currently expose a logger entry-point
-// parameter (that is phase-d-thread-3), we exercise the seam by
-// running the public entry point with a t.Cleanup-restored package
-// override of the test seam. To keep this self-contained, we override
-// the package-level `defaultCrawlerLogger` indirection introduced by
-// the production change.
-func withInjectedLogger(t *testing.T, lg *slog.Logger, fn func()) {
-	t.Helper()
-	prev := defaultCrawlerLogger
-	defaultCrawlerLogger = func() *slog.Logger { return lg }
-	t.Cleanup(func() { defaultCrawlerLogger = prev })
-	fn()
+// crawlWithLogger runs CrawlWithEnrichers with a captured *slog.Logger
+// installed via the new explicit logger parameter (phase-d-thread-3).
+// All hierarchy / dev-status / store dependencies are passed nil so the
+// orchestrator only exercises the always-on phases (fetch/parse/render
+// /store). This replaces the former package-level `defaultCrawlerLogger`
+// seam, which was a stop-gap and has been removed.
+func crawlWithLogger(
+	ctx context.Context,
+	cfg config.Config,
+	keys []string,
+	f *spanFakeFetcher,
+	sink events.Sink,
+	lg *slog.Logger,
+) (Summary, error) {
+	return CrawlWithEnrichers(ctx, cfg, keys, f, sink, nil, nil, nil, lg)
 }
 
 // ---------------------------------------------------------------------------
@@ -141,15 +141,13 @@ func TestSpanInstrumentation_SingleIssue_SpanEnvelope(t *testing.T) {
 	var buf bytes.Buffer
 	lg := captureLogger(&buf, slog.LevelInfo)
 
-	withInjectedLogger(t, lg, func() {
-		sum, err := Crawl(context.Background(), cfg, []string{"EX-1"}, ff, sink)
-		if err != nil {
-			t.Fatalf("Crawl: %v", err)
-		}
-		if sum.Fetched != 1 {
-			t.Errorf("Fetched: got %d, want 1", sum.Fetched)
-		}
-	})
+	sum, err := crawlWithLogger(context.Background(), cfg, []string{"EX-1"}, ff, sink, lg)
+	if err != nil {
+		t.Fatalf("CrawlWithEnrichers: %v", err)
+	}
+	if sum.Fetched != 1 {
+		t.Errorf("Fetched: got %d, want 1", sum.Fetched)
+	}
 
 	recs := recordsOf(t, &buf)
 	if len(recs) == 0 {
@@ -216,11 +214,9 @@ func TestSpanInstrumentation_FanoutLineageAtTrace(t *testing.T) {
 	var buf bytes.Buffer
 	lg := captureLogger(&buf, gojiralog.LevelTrace)
 
-	withInjectedLogger(t, lg, func() {
-		if _, err := Crawl(context.Background(), cfg, []string{"EX-1"}, ff, sink); err != nil {
-			t.Fatalf("Crawl: %v", err)
-		}
-	})
+	if _, err := crawlWithLogger(context.Background(), cfg, []string{"EX-1"}, ff, sink, lg); err != nil {
+		t.Fatalf("CrawlWithEnrichers: %v", err)
+	}
 
 	fanouts := findAllByMsg(recordsOf(t, &buf), "crawl.fanout")
 	if len(fanouts) == 0 {
@@ -314,11 +310,9 @@ func TestSpanInstrumentation_SkipIfExists_DebugLine(t *testing.T) {
 	var buf bytes.Buffer
 	lg := captureLogger(&buf, slog.LevelDebug)
 
-	withInjectedLogger(t, lg, func() {
-		if _, err := Crawl(context.Background(), cfg, []string{"EX-1"}, ff, sink); err != nil {
-			t.Fatalf("Crawl: %v", err)
-		}
-	})
+	if _, err := crawlWithLogger(context.Background(), cfg, []string{"EX-1"}, ff, sink, lg); err != nil {
+		t.Fatalf("CrawlWithEnrichers: %v", err)
+	}
 
 	hits := findAllByMsg(recordsOf(t, &buf), "crawl.skip_if_exists")
 	if len(hits) == 0 {
@@ -331,4 +325,177 @@ func TestSpanInstrumentation_SkipIfExists_DebugLine(t *testing.T) {
 	// Sentinel: classify import is still used by other tests; keep the
 	// linter happy if a future refactor drops the other reference.
 	_ = classify.KindJiraKey
+}
+
+// ---------------------------------------------------------------------------
+// phase-d-thread-3: CrawlWithEnrichers logger-parameter widening
+// ---------------------------------------------------------------------------
+
+// TestCrawlWithEnrichers_LoggerWidening_NilDefaultsToNoop asserts that the
+// new final `logger *slog.Logger` parameter, when passed as nil, defaults
+// to a no-op handler so the crawl still runs to completion with the same
+// observable Summary counts. This is the additive-widening invariant.
+func TestCrawlWithEnrichers_LoggerWidening_NilDefaultsToNoop(t *testing.T) {
+	cfg := config.Config{
+		Site:        "https://example.atlassian.net",
+		User:        "u@example.com",
+		Token:       "t",
+		OutputDir:   t.TempDir(),
+		Concurrency: 1,
+	}
+	ff := &spanFakeFetcher{payloads: map[string][]byte{
+		"EX-1": spanIssueJSON("EX-1", ""),
+	}}
+	sink := &events.RecordingSink{}
+
+	// Call CrawlWithEnrichers directly with logger=nil. The orchestrator
+	// must (a) not panic, (b) traverse to completion, and (c) report the
+	// same Summary counts as the Crawl wrapper would.
+	sum, err := CrawlWithEnrichers(
+		context.Background(),
+		cfg,
+		[]string{"EX-1"},
+		ff,
+		sink,
+		nil, // hier
+		nil, // devStatus
+		nil, // store
+		nil, // logger — exercising the nil-default seam
+	)
+	if err != nil {
+		t.Fatalf("CrawlWithEnrichers(logger=nil): %v", err)
+	}
+	if sum.Fetched != 1 {
+		t.Errorf("Fetched: got %d, want 1 (nil logger must not change counts)", sum.Fetched)
+	}
+	if sum.Failed != 0 {
+		t.Errorf("Failed: got %d, want 0", sum.Failed)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// phase-f-measure-1: per-call-type measurement aggregation on Summary
+// ---------------------------------------------------------------------------
+
+// TestPhaseMeasurement_Aggregated asserts that after a single-issue crawl,
+// the Summary surfaces non-empty per-phase tallies for the always-on
+// orchestrator-side phases (fetch, parse, render, store) and that a
+// `crawl.measurement` INFO record is emitted carrying the totals.
+func TestPhaseMeasurement_Aggregated(t *testing.T) {
+	cfg := config.Config{
+		Site:        "https://example.atlassian.net",
+		User:        "u@example.com",
+		Token:       "t",
+		OutputDir:   t.TempDir(),
+		Concurrency: 1,
+	}
+	ff := &spanFakeFetcher{payloads: map[string][]byte{
+		"EX-1": spanIssueJSON("EX-1", ""),
+	}}
+	sink := &events.RecordingSink{}
+
+	var buf bytes.Buffer
+	lg := captureLogger(&buf, slog.LevelInfo)
+
+	sum, err := CrawlWithEnrichers(
+		context.Background(),
+		cfg,
+		[]string{"EX-1"},
+		ff,
+		sink,
+		nil, // hier
+		nil, // devStatus
+		nil, // store
+		lg,  // logger — exercise the new explicit injection seam
+	)
+	if err != nil {
+		t.Fatalf("CrawlWithEnrichers: %v", err)
+	}
+	if sum.Fetched != 1 {
+		t.Fatalf("Fetched: got %d, want 1", sum.Fetched)
+	}
+
+	// Every always-on phase for a single successful issue must have
+	// produced at least one recorded invocation.
+	for _, phase := range []string{"fetch", "parse", "render", "store"} {
+		count, ok := sum.APICallCounts[phase]
+		if !ok {
+			t.Errorf("APICallCounts missing key %q; got map=%v", phase, sum.APICallCounts)
+			continue
+		}
+		if count < 1 {
+			t.Errorf("APICallCounts[%q] = %d; want >= 1", phase, count)
+		}
+		if _, ok := sum.APITimeByPhase[phase]; !ok {
+			t.Errorf("APITimeByPhase missing key %q; got map=%v", phase, sum.APITimeByPhase)
+		}
+	}
+
+	// TotalAPITime must equal the sum of APITimeByPhase values.
+	var sumTime int64
+	for _, d := range sum.APITimeByPhase {
+		sumTime += int64(d)
+	}
+	if int64(sum.TotalAPITime) != sumTime {
+		t.Errorf("TotalAPITime=%v != sum(APITimeByPhase)=%v",
+			sum.TotalAPITime, sumTime)
+	}
+
+	// A crawl.measurement INFO line must be emitted carrying the
+	// expected attrs.
+	hits := findAllByMsg(recordsOf(t, &buf), "crawl.measurement")
+	if len(hits) != 1 {
+		t.Fatalf("expected exactly 1 crawl.measurement record; got %d; buf:\n%s",
+			len(hits), buf.String())
+	}
+	rec := hits[0]
+	for _, attr := range []string{"total_api_time_ms", "total_duration_ms", "call_counts", "time_by_phase_ms"} {
+		if _, ok := rec[attr]; !ok {
+			t.Errorf("crawl.measurement missing attr %q; record=%v", attr, rec)
+		}
+	}
+}
+
+// TestPhaseMeasurement_HierarchyOnlyWhenEnabled asserts that the
+// hierarchy_jql key is absent from APICallCounts when no hierarchy
+// discoverer is wired (i.e. the phase never ran). This guards against
+// accidental zero-valued entries that would mislead consumers.
+func TestPhaseMeasurement_HierarchyOnlyWhenEnabled(t *testing.T) {
+	cfg := config.Config{
+		Site:        "https://example.atlassian.net",
+		User:        "u@example.com",
+		Token:       "t",
+		OutputDir:   t.TempDir(),
+		Concurrency: 1,
+		// IncludeChildren is false by default; even if it were true,
+		// hier=nil short-circuits the phase, so the key must stay absent.
+	}
+	ff := &spanFakeFetcher{payloads: map[string][]byte{
+		"EX-1": spanIssueJSON("EX-1", ""),
+	}}
+	sink := &events.RecordingSink{}
+
+	sum, err := CrawlWithEnrichers(
+		context.Background(),
+		cfg,
+		[]string{"EX-1"},
+		ff,
+		sink,
+		nil, // hier — phase must not record
+		nil, // devStatus
+		nil, // store
+		nil, // logger
+	)
+	if err != nil {
+		t.Fatalf("CrawlWithEnrichers: %v", err)
+	}
+	if _, present := sum.APICallCounts["hierarchy_jql"]; present {
+		t.Errorf("APICallCounts must not contain hierarchy_jql when no discoverer is wired; got %v", sum.APICallCounts)
+	}
+	if _, present := sum.APITimeByPhase["hierarchy_jql"]; present {
+		t.Errorf("APITimeByPhase must not contain hierarchy_jql when no discoverer is wired; got %v", sum.APITimeByPhase)
+	}
+	if _, present := sum.APICallCounts["dev_status"]; present {
+		t.Errorf("APICallCounts must not contain dev_status when no enricher is wired; got %v", sum.APICallCounts)
+	}
 }

@@ -261,6 +261,45 @@ func LoadAppConfig(configPath string, env map[string]string) (Config, error) {
 }
 
 // ---------------------------------------------------------------------------
+// ServerConfig — gRPC server configuration accessor
+// ---------------------------------------------------------------------------
+
+// ServerConfig holds the gRPC server configuration extracted from App.
+// It is separate from Config because server settings are not relevant
+// to the crawl orchestrator; the gRPC server reads this instead of
+// calling LoadAppConfig.
+type ServerConfig struct {
+	// Address is the gRPC server bind address (e.g. "127.0.0.1:50051").
+	Address string
+}
+
+// LoadServerConfig loads the App configuration through the full cascade
+// (embedded defaults < YAML file < GOJIRA_ environment variables) and
+// extracts the server settings. The gRPC server uses this instead of
+// LoadAppConfig so that server-only settings never pollute the crawl Config.
+//
+// configPath and env follow the same semantics as LoadAppConfig:
+//   - configPath: explicit YAML file path, or empty for discovery.
+//   - env: caller-supplied environment map (injectable for tests).
+//
+// On failure LoadServerConfig returns a zero ServerConfig and a descriptive
+// error. The same ErrConfigMissingRequired / ErrConfigInvalidValue sentinels
+// apply for config-file errors.
+func LoadServerConfig(configPath string, env map[string]string) (ServerConfig, error) {
+	app, err := config.LoadApp(config.LoadOptions{
+		ConfigPath:             configPath,
+		Env:                    env,
+		SkipSemanticValidation: true,
+	})
+	if err != nil {
+		return ServerConfig{}, err
+	}
+	return ServerConfig{
+		Address: app.Server.Address,
+	}, nil
+}
+
+// ---------------------------------------------------------------------------
 // Capability 3: GetIssue / FetchAndRender
 // ---------------------------------------------------------------------------
 

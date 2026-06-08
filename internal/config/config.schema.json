@@ -48,7 +48,8 @@
             "error",
             "warn",
             "info",
-            "debug"
+            "debug",
+            "trace"
           ],
           "default": "info"
         },

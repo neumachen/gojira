@@ -87,14 +87,16 @@ func TestSchemaValidator_UnknownTopLevelKey(t *testing.T) {
 // constraint on log.level catches unknown levels at Layer 1 (before
 // envext / struct population). The Layer-2 validator catches the
 // same case for App-struct callers, but Layer 1 is the source of
-// truth for raw file input.
+// truth for raw file input. Note that "trace" was added to the
+// accepted set in the crawl-observability phase; the bad example
+// here uses "verbose" instead.
 func TestSchemaValidator_BadLogLevelEnum(t *testing.T) {
 	sv, err := NewSchemaValidator()
 	require.NoError(t, err)
 
 	doc := validRawDoc(t)
 	log := doc["log"].(map[string]any)
-	log["level"] = "trace"
+	log["level"] = "verbose"
 
 	err = sv.ValidateRaw(doc)
 	require.Error(t, err)

@@ -224,9 +224,11 @@ jria:
 }
 
 // TestLoadApp_SchemaValidation_BadLogLevel asserts Layer 1 rejects
-// an invalid enum value (e.g. log.level: trace). The Layer-2 check
+// an invalid enum value (e.g. log.level: verbose). The Layer-2 check
 // catches the same case for App-struct callers; Layer 1 catches it
-// against the raw document before envext gets near it.
+// against the raw document before envext gets near it. Note that
+// "trace" was added to the accepted set in the crawl-observability
+// phase, so the bad example here uses "verbose" instead.
 func TestLoadApp_SchemaValidation_BadLogLevel(t *testing.T) {
 	const badYAML = `schema: gojira.config.v1
 jira:
@@ -236,11 +238,31 @@ jira:
 output:
   dir: /tmp/x
 log:
-  level: trace
+  level: verbose
 `
 	_, err := LoadApp(LoadOptions{YAML: strings.NewReader(badYAML)})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidValue)
+}
+
+// TestLoadApp_SchemaValidation_TraceLogLevelAccepted asserts that
+// log.level: trace passes Layer 1 schema validation — the
+// observability extension below slog.LevelDebug must be a first-
+// class accepted level, not a magic word.
+func TestLoadApp_SchemaValidation_TraceLogLevelAccepted(t *testing.T) {
+	const goodYAML = `schema: gojira.config.v1
+jira:
+  base_url: https://x.atlassian.net
+  email: x@example.com
+  api_token: tok
+output:
+  dir: /tmp/x
+log:
+  level: trace
+`
+	app, err := LoadApp(LoadOptions{YAML: strings.NewReader(goodYAML)})
+	require.NoError(t, err)
+	assert.Equal(t, "trace", app.Log.Level, "log.level=trace must round-trip through Layer 1")
 }
 
 // TestLoadApp_MissingRequired_NoCredentials asserts Layer 2

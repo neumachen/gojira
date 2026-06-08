@@ -51,7 +51,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"os/signal"
 	"sort"
@@ -435,7 +434,7 @@ func crawlFlags(env map[string]string) []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:    "log-level",
-			Usage:   "Log verbosity: error|warn|info|debug",
+			Usage:   "Log verbosity: error|warn|info|debug|trace",
 			Sources: src("GOJIRA_LOG_LEVEL"),
 		},
 		&cli.StringFlag{
@@ -570,12 +569,14 @@ func runCrawl(ctx context.Context, cmd *cli.Command, env map[string]string, sign
 	format, _ := log.ParseFormat(cfg.LogFormat)
 
 	// cfg.LogLevel has likewise been validated against {error, warn,
-	// info, debug}. slog.Level.UnmarshalText accepts the uppercase
-	// canonical names ("ERROR", "WARN", "INFO", "DEBUG"); upper-casing
-	// the validated value satisfies that and keeps the level mapping
-	// trivial.
-	var slevel slog.Level
-	_ = slevel.UnmarshalText([]byte(strings.ToUpper(cfg.LogLevel)))
+	// info, debug, trace}. log.ParseLevel accepts "trace" (slog's
+	// UnmarshalText does NOT — it only knows the four built-in
+	// levels), and matches the validator's accepted set exactly.
+	// Validation has already run upstream, so the only way ParseLevel
+	// fails here is a code-level inconsistency between the validator
+	// and the parser — discard the error to keep the existing
+	// no-error surface, mirroring the previous UnmarshalText pattern.
+	slevel, _ := log.ParseLevel(cfg.LogLevel)
 
 	logger := log.New(format, slevel, stderr)
 	sink := gojira.NewSlogSink(logger)

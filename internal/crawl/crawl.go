@@ -957,7 +957,10 @@ func CrawlWithEnrichers(
 
 	c.summary.Duration = time.Since(start)
 
-	// Emit crawl summary event.
+	// Emit crawl summary event. The Message string is preserved verbatim
+	// for text-only consumers (slog sink, RecordingSink dumps, etc.); the
+	// new Summary field gives structured sinks (e.g. the grpcSink) typed
+	// access to the same totals without re-parsing the message.
 	sink.Emit(events.Event{
 		Kind: events.KindCrawlSummary,
 		Message: fmt.Sprintf(
@@ -967,6 +970,19 @@ func CrawlWithEnrichers(
 			c.summary.Duration,
 		),
 		Timestamp: time.Now(),
+		Summary: &events.CrawlSummary{
+			Fetched:        c.summary.Fetched,
+			Skipped:        c.summary.Skipped,
+			Stubbed:        c.summary.Stubbed,
+			Failed:         c.summary.Failed,
+			CapLimited:     c.summary.CapLimited,
+			PRsFound:       c.summary.PRsFound,
+			FetchedKeys:    c.summary.FetchedKeys,
+			StubbedKeys:    c.summary.StubbedKeys,
+			FailedKeys:     c.summary.FailedKeys,
+			CapLimitedKeys: c.summary.CapLimitedKeys,
+			Duration:       c.summary.Duration,
+		},
 	})
 
 	return c.summary, c.abortErr

@@ -41,14 +41,37 @@ func (s *grpcSink) Emit(e events.Event) {
 		Timestamp: timestamppb.New(e.Timestamp),
 	}
 
-	// For KindCrawlSummary the crawl package currently encodes the summary
-	// counts in the human-readable Message string; the structured Summary
-	// oneof is populated only when the event carries a non-nil Summary value.
-	// events.Event does not yet carry a structured Summary field, so the
-	// oneof is left nil and the Message string carries the summary text.
+	// When the event carries a structured crawl summary (KindCrawlSummary),
+	// populate the CrawlEvent.summary oneof so clients get typed totals in
+	// addition to the human-readable Message. The oneof remains nil for
+	// every other event kind and for KindCrawlSummary events emitted by
+	// callers that did not attach a Summary (e.g. older test fixtures).
+	if e.Summary != nil {
+		msg.Payload = &gojirav1.CrawlEvent_Summary{Summary: crawlSummaryToProto(e.Summary)}
+	}
 
 	//nolint:errcheck // Send errors are intentionally discarded; see doc comment.
 	_ = s.stream.Send(msg)
+}
+
+// crawlSummaryToProto converts an [events.CrawlSummary] to its proto
+// representation. Duration is reported in whole milliseconds to match the
+// proto's duration_ms field. Nil-valued slices and maps round-trip
+// unchanged (proto3 normalises nil and empty identically on the wire).
+func crawlSummaryToProto(s *events.CrawlSummary) *gojirav1.Summary {
+	return &gojirav1.Summary{
+		Fetched:        int32(s.Fetched),
+		Skipped:        int32(s.Skipped),
+		Stubbed:        int32(s.Stubbed),
+		Failed:         int32(s.Failed),
+		CapLimited:     int32(s.CapLimited),
+		PrsFound:       int32(s.PRsFound),
+		FetchedKeys:    s.FetchedKeys,
+		StubbedKeys:    s.StubbedKeys,
+		FailedKeys:     s.FailedKeys,
+		CapLimitedKeys: s.CapLimitedKeys,
+		DurationMs:     s.Duration.Milliseconds(),
+	}
 }
 
 // kindToProto maps an events.Kind string to the corresponding

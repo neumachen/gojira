@@ -283,3 +283,112 @@ func TestNewGRPCStreamSink_CrawlSummaryNoSummaryOneof(t *testing.T) {
 		t.Error("Message: expected non-empty summary text")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// CrawlEvent.summary oneof — structured totals on the wire
+// ---------------------------------------------------------------------------
+
+// TestGRPCSink_PopulatesSummaryOneof confirms that when an events.Event
+// carries a non-nil *CrawlSummary, the grpcSink populates the proto
+// CrawlEvent.summary oneof with the typed totals — in addition to (not
+// instead of) the human-readable Message string. This is the wiring that
+// lets gRPC clients read structured counts without re-parsing text.
+func TestGRPCSink_PopulatesSummaryOneof(t *testing.T) {
+	t.Parallel()
+
+	stream := &fakeStream{}
+	sink := grpcserver.NewGRPCStreamSink(stream)
+
+	sink.Emit(events.Event{
+		Kind:      events.KindCrawlSummary,
+		Message:   "crawl complete: fetched=3",
+		Timestamp: fixedTime,
+		Summary: &events.CrawlSummary{
+			Fetched:     3,
+			Skipped:     1,
+			Stubbed:     0,
+			Failed:      0,
+			CapLimited:  0,
+			PRsFound:    2,
+			FetchedKeys: []string{"A-1"},
+			FailedKeys:  map[string]string{"B-2": "boom"},
+			Duration:    1500 * time.Millisecond,
+		},
+	})
+
+	got := stream.Sent()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 streamed message, got %d", len(got))
+	}
+	msg := got[0]
+
+	if msg.GetKind() != gojirav1.CrawlEvent_KIND_CRAWL_SUMMARY {
+		t.Errorf("Kind: got %v, want KIND_CRAWL_SUMMARY", msg.GetKind())
+	}
+	if msg.GetMessage() == "" {
+		t.Error("Message must still be set for text-only consumers")
+	}
+
+	pbSummary := msg.GetSummary()
+	if pbSummary == nil {
+		t.Fatal("Summary oneof must be populated when events.Event carries a Summary")
+	}
+	if got, want := pbSummary.GetFetched(), int32(3); got != want {
+		t.Errorf("Summary.Fetched: got %d, want %d", got, want)
+	}
+	if got, want := pbSummary.GetSkipped(), int32(1); got != want {
+		t.Errorf("Summary.Skipped: got %d, want %d", got, want)
+	}
+	if got, want := pbSummary.GetPrsFound(), int32(2); got != want {
+		t.Errorf("Summary.PrsFound: got %d, want %d", got, want)
+	}
+	if got, want := pbSummary.GetFetchedKeys(), []string{"A-1"}; !equalStringSlice(got, want) {
+		t.Errorf("Summary.FetchedKeys: got %v, want %v", got, want)
+	}
+	if got := pbSummary.GetFailedKeys()["B-2"]; got != "boom" {
+		t.Errorf("Summary.FailedKeys[B-2]: got %q, want \"boom\"", got)
+	}
+	if got, want := pbSummary.GetDurationMs(), int64(1500); got != want {
+		t.Errorf("Summary.DurationMs: got %d, want %d", got, want)
+	}
+}
+
+// TestGRPCSink_NonSummaryLeavesOneofNil is the negative companion to
+// TestGRPCSink_PopulatesSummaryOneof: events whose Summary field is nil
+// (every non-KindCrawlSummary event, plus legacy callers that don't
+// attach one) must leave the proto oneof unset.
+func TestGRPCSink_NonSummaryLeavesOneofNil(t *testing.T) {
+	t.Parallel()
+
+	stream := &fakeStream{}
+	sink := grpcserver.NewGRPCStreamSink(stream)
+
+	sink.Emit(events.Event{
+		Kind:      events.KindIssueFetched,
+		IssueKey:  "A-1",
+		Message:   "fetched A-1",
+		Timestamp: fixedTime,
+	})
+
+	got := stream.Sent()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 streamed message, got %d", len(got))
+	}
+	if got[0].GetSummary() != nil {
+		t.Errorf("Summary oneof must remain nil for non-summary events; got %+v", got[0].GetSummary())
+	}
+}
+
+// equalStringSlice is a small local helper to keep the test free of an
+// extra reflect/dependency import.
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

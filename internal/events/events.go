@@ -121,6 +121,33 @@ type Event struct {
 	// FieldKey is the custom field key for KindUnknownCustomField events.
 	// Empty for all other kinds.
 	FieldKey string
+
+	// Summary carries the structured crawl totals for KindCrawlSummary
+	// events. Nil for all other kinds. Sinks that want structured access to
+	// the final counts read this instead of parsing Message.
+	Summary *CrawlSummary
+}
+
+// CrawlSummary carries the aggregate counts and key lists from a completed
+// crawl. It is attached to the KindCrawlSummary Event so structured Sinks
+// (e.g. a gRPC stream adapter) can deliver the totals without re-parsing the
+// human-readable Message string.
+//
+// CrawlSummary is a plain value type using only standard-library types so the
+// events package remains free of project-internal imports. The crawl package
+// builds one from its own crawl.Summary when it emits the final event.
+type CrawlSummary struct {
+	Fetched        int
+	Skipped        int
+	Stubbed        int
+	Failed         int
+	CapLimited     int
+	PRsFound       int
+	FetchedKeys    []string
+	StubbedKeys    []string
+	FailedKeys     map[string]string
+	CapLimitedKeys []string
+	Duration       time.Duration
 }
 
 // Sink is the interface that callers implement to receive events from the

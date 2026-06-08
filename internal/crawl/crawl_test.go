@@ -672,6 +672,20 @@ func TestCrawl_CrawlSummaryEvent(t *testing.T) {
 	_, err := Crawl(ctx, cfg, []string{"EXAMPLE-1"}, ff, sink)
 	require.NoError(t, err)
 	assert.Equal(t, 1, countEvents(sink, events.KindCrawlSummary), "KindCrawlSummary count")
+
+	// The summary event must also carry the structured CrawlSummary so
+	// downstream sinks (e.g. the gRPC stream adapter) can deliver typed
+	// totals without re-parsing the Message string.
+	var summaryEvent events.Event
+	for _, e := range sink.Events() {
+		if e.Kind == events.KindCrawlSummary {
+			summaryEvent = e
+			break
+		}
+	}
+	require.NotNil(t, summaryEvent.Summary, "KindCrawlSummary event must carry a structured Summary")
+	assert.Equal(t, 1, summaryEvent.Summary.Fetched, "Summary.Fetched should mirror the run")
+	assert.Equal(t, []string{"EXAMPLE-1"}, summaryEvent.Summary.FetchedKeys, "Summary.FetchedKeys")
 }
 
 // ---------------------------------------------------------------------------

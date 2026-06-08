@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -757,4 +758,120 @@ func TestDevStatus_ObjectErrorsDoNotCrashUnmarshal(t *testing.T) {
 	// Detail is still consumed normally.
 	require.Len(t, resp.Detail, 1)
 	assert.Equal(t, "GitHub", resp.Detail[0].Instance.Type)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2 (phase-a-transport-1): PUT transport + 400/409 status handling
+// ---------------------------------------------------------------------------
+
+// TestNewPutJSON_MethodAndHeaders drives a PUT through the new
+// DoPutForTest shim and asserts that the request hit the server with
+// PUT, the canonical auth/UA/Accept/Content-Type headers, and an
+// intact body. This is the unit-level proof that newPutJSON is wired
+// the same way newPostJSON is — minus the actual write methods, which
+// land in later Phase 2 tasks.
+func TestNewPutJSON_MethodAndHeaders(t *testing.T) {
+	const reqBody = `{"fields":{"summary":"hi"}}`
+
+	var (
+		gotMethod      string
+		gotAuth        string
+		gotUA          string
+		gotAccept      string
+		gotContentType string
+		gotBody        string
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotAuth = r.Header.Get("Authorization")
+		gotUA = r.Header.Get("User-Agent")
+		gotAccept = r.Header.Get("Accept")
+		gotContentType = r.Header.Get("Content-Type")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv)
+
+	body, err := c.DoPutForTest(context.Background(), srv.URL+"/rest/api/3/issue/PROJ-1", []byte(reqBody))
+	require.NoError(t, err, "DoPutForTest must succeed on 204")
+	assert.Empty(t, body, "204 No Content must surface as an empty body")
+
+	assert.Equal(t, http.MethodPut, gotMethod, "method")
+	assert.Equal(t, expectedAuthHeader(), gotAuth, "Authorization")
+	assert.Equal(t, "gojira/0.1.0", gotUA, "User-Agent")
+	assert.Equal(t, "application/json", gotAccept, "Accept")
+	assert.Equal(t, "application/json", gotContentType, "Content-Type")
+	assert.Equal(t, reqBody, gotBody, "body must round-trip verbatim")
+}
+
+// TestDoWithRetry_PutStatusMapping is the table that exercises the
+// extended status switch end-to-end via the PUT path. 200/201/204 are
+// success; 400/409 map to the new sentinels via errors.Is; the
+// existing 401/403/404 sentinels keep working through PUT exactly as
+// they do through GET, proving the switch was widened additively.
+func TestDoWithRetry_PutStatusMapping(t *testing.T) {
+	const okBody = `{"id":"10001","key":"PROJ-1"}`
+
+	cases := []struct {
+		name       string
+		status     int
+		respBody   string
+		wantErr    error // nil for success
+		wantBody   string
+		wantErrMsg string // substring match when wantErr is nil but a wrapped error is expected
+	}{
+		{"200 OK is success", http.StatusOK, okBody, nil, okBody, ""},
+		{"201 Created is success", http.StatusCreated, okBody, nil, okBody, ""},
+		{"204 No Content is success with empty body", http.StatusNoContent, "", nil, "", ""},
+		{"400 maps to ErrBadRequest", http.StatusBadRequest, `{"errorMessages":["bad"]}`, client.ErrBadRequest, "", ""},
+		{"401 still maps to ErrUnauthorized", http.StatusUnauthorized, "", client.ErrUnauthorized, "", ""},
+		{"403 still maps to ErrForbidden", http.StatusForbidden, "", client.ErrForbidden, "", ""},
+		{"404 still maps to ErrNotFound", http.StatusNotFound, "", client.ErrNotFound, "", ""},
+		{"409 maps to ErrConflict", http.StatusConflict, `{"errorMessages":["conflict"]}`, client.ErrConflict, "", ""},
+		{"500 still falls through to wrapped status error", http.StatusInternalServerError, "", nil, "", "unexpected status 500"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPut {
+					t.Errorf("server got method %s, want PUT", r.Method)
+				}
+				if tc.respBody == "" {
+					w.WriteHeader(tc.status)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.respBody)
+			}))
+			defer srv.Close()
+
+			c := newTestClient(t, srv, client.WithMaxRetries(0))
+
+			body, err := c.DoPutForTest(context.Background(),
+				srv.URL+"/rest/api/3/issue/PROJ-1",
+				[]byte(`{"fields":{"summary":"x"}}`))
+
+			switch {
+			case tc.wantErr != nil:
+				require.Error(t, err)
+				assert.True(t, errors.Is(err, tc.wantErr),
+					"errors.Is(err, %v) must be true; got %v", tc.wantErr, err)
+
+			case tc.wantErrMsg != "":
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErrMsg)
+
+			default:
+				require.NoError(t, err)
+				assert.Equal(t, tc.wantBody, string(body), "body")
+			}
+		})
+	}
 }

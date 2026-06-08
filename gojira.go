@@ -1,17 +1,19 @@
 // Package gojira is the public library facade for the gojira Jira-to-Markdown
-// mirror tool. It exposes exactly four named capabilities committed in PRD §8:
+// mirror tool. It exposes exactly five named capabilities committed in PRD §8:
 //
 //  1. [Classify] — classify a URL or bare issue key.
 //  2. [LoadConfig] / [Config] — build and validate a runtime configuration.
-//  3. [FetchAndRender] — fetch one Jira issue and return rendered Markdown.
-//  4. [Crawl] / [Summary] — run a full recursive crawl to disk.
+//  3. [GetIssue] — fetch one Jira issue and return structured typed data.
+//  4. [FetchAndRender] — fetch one Jira issue and return rendered Markdown
+//     (convenience wrapper over [GetIssue] + render).
+//  5. [Crawl] / [Summary] — run a full recursive crawl to disk.
 //
 // # Public surface invariants
 //
 //   - No flag parsing, CLI argument handling, or process-level signal handling.
 //   - No os.Exit calls.
 //   - No hard-coded credentials, Jira domains, or project keys.
-//   - All internal packages are hidden; only the four capabilities and their
+//   - All internal packages are hidden; only the five capabilities and their
 //     supporting types are exported.
 //   - The CLI binary (cmd/gojira) is a thin consumer of this package; it is
 //     never required to use the library.
@@ -259,12 +261,68 @@ func LoadAppConfig(configPath string, env map[string]string) (Config, error) {
 }
 
 // ---------------------------------------------------------------------------
-// Capability 3: FetchAndRender
+// Capability 3: GetIssue / FetchAndRender
 // ---------------------------------------------------------------------------
+
+// GetIssue fetches a single Jira issue identified by key, parses its ADF
+// description and relationships, and returns the structured typed data without
+// rendering anything to Markdown.
+//
+// It is the "fetch" half of [FetchAndRender], exposed independently so callers
+// such as MCP handlers or TUI components can obtain typed data without forcing
+// a Markdown render pass.
+//
+// # Parameters
+//
+//   - ctx: controls the lifetime of the HTTP request.
+//   - cfg: validated runtime configuration (construct via [LoadConfig]).
+//   - key: Jira issue key, e.g. "PROJ-1".
+//   - opts: optional [client.Option] values (e.g. client.WithHTTPClient for
+//     tests). Pass nil or omit for production use.
+//
+// # Return values
+//
+//   - issue: the fully parsed [parse.Issue] value.
+//   - refs: outbound references discovered by [extract.Extract], in extract's
+//     documented order (description → parent → subtasks → issuelinks →
+//     remotelinks). May contain duplicates; the caller is responsible for
+//     deduplication.
+//   - err: non-nil on fetch, parse, or extract failure.
+func GetIssue(ctx context.Context, cfg Config, key string, opts ...client.Option) (parse.Issue, []extract.Reference, error) {
+	// Build the HTTP client.
+	c, err := client.New(cfg, opts...)
+	if err != nil {
+		return parse.Issue{}, nil, errext.Errorf("gojira: build client: %w", err)
+	}
+
+	// Fetch raw issue bytes.
+	f := fetch.New(c)
+	raw, err := f.Fetch(ctx, key)
+	if err != nil {
+		return parse.Issue{}, nil, errext.Errorf("gojira: fetch %s: %w", key, err)
+	}
+
+	// Parse.
+	issue, err := parse.Parse(raw, cfg.Site)
+	if err != nil {
+		return parse.Issue{}, nil, errext.Errorf("gojira: parse %s: %w", key, err)
+	}
+
+	// Extract outbound references.
+	refs, err := extract.Extract(issue, cfg.Site)
+	if err != nil {
+		return parse.Issue{}, nil, errext.Errorf("gojira: extract %s: %w", key, err)
+	}
+
+	return issue, refs, nil
+}
 
 // FetchAndRender fetches a single Jira issue identified by key, parses its
 // ADF description and relationships, and returns the rendered Markdown content
 // for both the issue page and its outbound reference index.
+//
+// It is a convenience wrapper over [GetIssue] + render. It shares all fetch,
+// parse, and extract logic with [GetIssue]; only the render step is added here.
 //
 // It does NOT write anything to disk. The caller decides what to do with the
 // returned strings (write them, embed them in a larger pipeline, etc.).
@@ -295,29 +353,10 @@ func LoadAppConfig(configPath string, env map[string]string) (Config, error) {
 // render as absolute Jira browse URLs rather than relative Markdown paths.
 // Use [Crawl] for a full recursive crawl where relative links are resolved.
 func FetchAndRender(ctx context.Context, cfg Config, key string, opts ...client.Option) (indexMD, outboundMD string, discoveredKeys []string, err error) {
-	// Build the HTTP client.
-	c, err := client.New(cfg, opts...)
+	// Delegate fetch→parse→extract to GetIssue.
+	issue, refs, err := GetIssue(ctx, cfg, key, opts...)
 	if err != nil {
-		return "", "", nil, errext.Errorf("gojira: build client: %w", err)
-	}
-
-	// Fetch raw issue bytes.
-	f := fetch.New(c)
-	raw, err := f.Fetch(ctx, key)
-	if err != nil {
-		return "", "", nil, errext.Errorf("gojira: fetch %s: %w", key, err)
-	}
-
-	// Parse.
-	issue, err := parse.Parse(raw, cfg.Site)
-	if err != nil {
-		return "", "", nil, errext.Errorf("gojira: parse %s: %w", key, err)
-	}
-
-	// Extract outbound references.
-	refs, err := extract.Extract(issue, cfg.Site)
-	if err != nil {
-		return "", "", nil, errext.Errorf("gojira: extract %s: %w", key, err)
+		return "", "", nil, err
 	}
 
 	// Collect discovered Jira keys (in extract's documented order).
@@ -350,7 +389,7 @@ func FetchAndRender(ctx context.Context, cfg Config, key string, opts ...client.
 }
 
 // ---------------------------------------------------------------------------
-// Capability 4: Crawl
+// Capability 5: Crawl
 // ---------------------------------------------------------------------------
 
 // Crawl executes a full recursive Jira issue crawl starting from startKeys.

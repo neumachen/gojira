@@ -636,3 +636,215 @@ func TestCrawl_NilSink(t *testing.T) {
 	require.NoError(t, err, "Crawl with nil sink")
 	assert.Equal(t, 1, sum.Fetched, "Summary.Fetched")
 }
+
+// ---------------------------------------------------------------------------
+// GetIssue — structured data (fetch/render split)
+// ---------------------------------------------------------------------------
+
+// TestGetIssue is a table-driven test for the GetIssue facade function.
+// It covers: success with no links, success with outbound Jira links, fetch
+// failure (non-200 response), and parse failure (malformed JSON).
+func TestGetIssue(t *testing.T) {
+	outputDir := t.TempDir()
+
+	tests := []struct {
+		name string
+		// serverFn builds the httptest handler for this case.
+		serverFn func(siteURL string) http.HandlerFunc
+		// key is the issue key to request.
+		key string
+		// wantErr is true when GetIssue must return a non-nil error.
+		wantErr bool
+		// wantKey is the expected issue.Key on success.
+		wantKey string
+		// wantSummary is a substring expected in issue.Summary on success.
+		wantSummary string
+		// wantRefKeys are Jira issue keys expected in the returned refs.
+		wantRefKeys []string
+	}{
+		{
+			name: "success: minimal issue, no links",
+			serverFn: func(siteURL string) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					const prefix = "/rest/api/3/issue/"
+					if !strings.HasPrefix(r.URL.Path, prefix) {
+						http.NotFound(w, r)
+						return
+					}
+					key := strings.TrimPrefix(r.URL.Path, prefix)
+					if idx := strings.Index(key, "/"); idx >= 0 {
+						key = key[:idx]
+					}
+					if key != "PROJ-1" {
+						http.NotFound(w, r)
+						return
+					}
+					body := minimalIssueJSON("PROJ-1", siteURL)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(body)
+				}
+			},
+			key:         "PROJ-1",
+			wantErr:     false,
+			wantKey:     "PROJ-1",
+			wantSummary: "Summary of PROJ-1",
+			wantRefKeys: nil,
+		},
+		{
+			name: "success: issue with outbound Jira link",
+			serverFn: func(siteURL string) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					const prefix = "/rest/api/3/issue/"
+					if !strings.HasPrefix(r.URL.Path, prefix) {
+						http.NotFound(w, r)
+						return
+					}
+					key := strings.TrimPrefix(r.URL.Path, prefix)
+					if idx := strings.Index(key, "/"); idx >= 0 {
+						key = key[:idx]
+					}
+					if key != "PROJ-2" {
+						http.NotFound(w, r)
+						return
+					}
+					body := issueWithLinkJSON("PROJ-2", "PROJ-3", siteURL)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(body)
+				}
+			},
+			key:         "PROJ-2",
+			wantErr:     false,
+			wantKey:     "PROJ-2",
+			wantSummary: "Summary of PROJ-2",
+			wantRefKeys: []string{"PROJ-3"},
+		},
+		{
+			name: "fetch failure: server returns 404",
+			serverFn: func(siteURL string) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					http.NotFound(w, r)
+				}
+			},
+			key:     "PROJ-99",
+			wantErr: true,
+		},
+		{
+			name: "parse failure: server returns malformed JSON",
+			serverFn: func(siteURL string) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					const prefix = "/rest/api/3/issue/"
+					if !strings.HasPrefix(r.URL.Path, prefix) {
+						http.NotFound(w, r)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					// Deliberately malformed JSON.
+					_, _ = w.Write([]byte(`{not valid json`))
+				}
+			},
+			key:     "PROJ-BAD",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(tt.serverFn(""))
+			// Re-create handler with the real server URL now that srv exists.
+			srv.Close()
+			srv = httptest.NewServer(tt.serverFn(srv.URL))
+			t.Cleanup(srv.Close)
+
+			cfg := testConfig(t, srv.URL, outputDir)
+			ctx := context.Background()
+
+			issue, refs, err := gojira.GetIssue(ctx, cfg, tt.key,
+				client.WithHTTPClient(srv.Client()),
+			)
+
+			if tt.wantErr {
+				require.Error(t, err, "GetIssue must return an error for %q", tt.name)
+				return
+			}
+
+			require.NoError(t, err, "GetIssue must not return an error for %q", tt.name)
+
+			// Verify issue fields.
+			assert.Equal(t, tt.wantKey, issue.Key, "issue.Key")
+			assert.Contains(t, issue.Summary, tt.wantSummary, "issue.Summary")
+
+			// Verify discovered Jira keys from refs.
+			var gotRefKeys []string
+			for _, r := range refs {
+				if r.IssueKey != "" {
+					gotRefKeys = append(gotRefKeys, r.IssueKey)
+				}
+			}
+			if len(tt.wantRefKeys) == 0 {
+				assert.Empty(t, gotRefKeys, "refs must be empty")
+			} else {
+				for _, wk := range tt.wantRefKeys {
+					assert.Contains(t, gotRefKeys, wk, "refs must contain %q", wk)
+				}
+			}
+		})
+	}
+}
+
+// TestGetIssue_FetchAndRenderConsistency verifies that GetIssue and
+// FetchAndRender agree on the parsed issue key and discovered Jira keys
+// when given the same input. This pins the contract that FetchAndRender
+// is a pure convenience wrapper over GetIssue.
+func TestGetIssue_FetchAndRenderConsistency(t *testing.T) {
+	outputDir := t.TempDir()
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		const prefix = "/rest/api/3/issue/"
+		if !strings.HasPrefix(r.URL.Path, prefix) {
+			http.NotFound(w, r)
+			return
+		}
+		key := strings.TrimPrefix(r.URL.Path, prefix)
+		if idx := strings.Index(key, "/"); idx >= 0 {
+			key = key[:idx]
+		}
+		if key != "CONSIST-1" {
+			http.NotFound(w, r)
+			return
+		}
+		body := issueWithLinkJSON("CONSIST-1", "CONSIST-2", srv.URL)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := testConfig(t, srv.URL, outputDir)
+	ctx := context.Background()
+	hc := client.WithHTTPClient(srv.Client())
+
+	// Call GetIssue.
+	issue, refs, err := gojira.GetIssue(ctx, cfg, "CONSIST-1", hc)
+	require.NoError(t, err, "GetIssue")
+
+	// Call FetchAndRender with the same inputs.
+	_, _, discoveredKeys, err := gojira.FetchAndRender(ctx, cfg, "CONSIST-1", hc)
+	require.NoError(t, err, "FetchAndRender")
+
+	// issue.Key must match what FetchAndRender would have parsed.
+	assert.Equal(t, "CONSIST-1", issue.Key)
+
+	// Discovered keys from GetIssue refs must match FetchAndRender's discoveredKeys.
+	var refKeys []string
+	for _, r := range refs {
+		if r.IssueKey != "" {
+			refKeys = append(refKeys, r.IssueKey)
+		}
+	}
+	assert.Equal(t, discoveredKeys, refKeys,
+		"GetIssue refs and FetchAndRender discoveredKeys must agree")
+}

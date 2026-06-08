@@ -19,9 +19,14 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Gojira_Classify_FullMethodName = "/gojira.v1.Gojira/Classify"
-	Gojira_GetIssue_FullMethodName = "/gojira.v1.Gojira/GetIssue"
-	Gojira_Crawl_FullMethodName    = "/gojira.v1.Gojira/Crawl"
+	Gojira_Classify_FullMethodName        = "/gojira.v1.Gojira/Classify"
+	Gojira_GetIssue_FullMethodName        = "/gojira.v1.Gojira/GetIssue"
+	Gojira_Crawl_FullMethodName           = "/gojira.v1.Gojira/Crawl"
+	Gojira_CreateIssue_FullMethodName     = "/gojira.v1.Gojira/CreateIssue"
+	Gojira_UpdateIssue_FullMethodName     = "/gojira.v1.Gojira/UpdateIssue"
+	Gojira_AddComment_FullMethodName      = "/gojira.v1.Gojira/AddComment"
+	Gojira_ListTransitions_FullMethodName = "/gojira.v1.Gojira/ListTransitions"
+	Gojira_TransitionIssue_FullMethodName = "/gojira.v1.Gojira/TransitionIssue"
 )
 
 // GojiraClient is the client API for Gojira service.
@@ -46,6 +51,23 @@ type GojiraClient interface {
 	// to the caller. Crawl content is persisted server-side via FSStore;
 	// per-issue content over the wire is available on demand via GetIssue.
 	Crawl(ctx context.Context, in *CrawlRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CrawlEvent], error)
+	// CreateIssue creates a new Jira issue and returns its key/id/self URL.
+	// When dry_run is set the server returns the request body it WOULD send
+	// (in dry_run_body) without contacting Jira.
+	CreateIssue(ctx context.Context, in *CreateIssueRequest, opts ...grpc.CallOption) (*CreateIssueResponse, error)
+	// UpdateIssue edits fields on an existing issue. Honors dry_run like
+	// CreateIssue.
+	UpdateIssue(ctx context.Context, in *UpdateIssueRequest, opts ...grpc.CallOption) (*UpdateIssueResponse, error)
+	// AddComment appends a comment (plain text, converted to ADF server-side)
+	// to an issue.
+	AddComment(ctx context.Context, in *AddCommentRequest, opts ...grpc.CallOption) (*AddCommentResponse, error)
+	// ListTransitions lists the workflow transitions currently available for
+	// an issue (id, name, target status).
+	ListTransitions(ctx context.Context, in *ListTransitionsRequest, opts ...grpc.CallOption) (*ListTransitionsResponse, error)
+	// TransitionIssue moves an issue through a workflow transition, selected
+	// either by transition_id or by target_status_name (resolved server-side
+	// via ListTransitions).
+	TransitionIssue(ctx context.Context, in *TransitionIssueRequest, opts ...grpc.CallOption) (*TransitionIssueResponse, error)
 }
 
 type gojiraClient struct {
@@ -95,6 +117,56 @@ func (c *gojiraClient) Crawl(ctx context.Context, in *CrawlRequest, opts ...grpc
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Gojira_CrawlClient = grpc.ServerStreamingClient[CrawlEvent]
 
+func (c *gojiraClient) CreateIssue(ctx context.Context, in *CreateIssueRequest, opts ...grpc.CallOption) (*CreateIssueResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateIssueResponse)
+	err := c.cc.Invoke(ctx, Gojira_CreateIssue_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gojiraClient) UpdateIssue(ctx context.Context, in *UpdateIssueRequest, opts ...grpc.CallOption) (*UpdateIssueResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateIssueResponse)
+	err := c.cc.Invoke(ctx, Gojira_UpdateIssue_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gojiraClient) AddComment(ctx context.Context, in *AddCommentRequest, opts ...grpc.CallOption) (*AddCommentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddCommentResponse)
+	err := c.cc.Invoke(ctx, Gojira_AddComment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gojiraClient) ListTransitions(ctx context.Context, in *ListTransitionsRequest, opts ...grpc.CallOption) (*ListTransitionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTransitionsResponse)
+	err := c.cc.Invoke(ctx, Gojira_ListTransitions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gojiraClient) TransitionIssue(ctx context.Context, in *TransitionIssueRequest, opts ...grpc.CallOption) (*TransitionIssueResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TransitionIssueResponse)
+	err := c.cc.Invoke(ctx, Gojira_TransitionIssue_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GojiraServer is the server API for Gojira service.
 // All implementations must embed UnimplementedGojiraServer
 // for forward compatibility.
@@ -117,6 +189,23 @@ type GojiraServer interface {
 	// to the caller. Crawl content is persisted server-side via FSStore;
 	// per-issue content over the wire is available on demand via GetIssue.
 	Crawl(*CrawlRequest, grpc.ServerStreamingServer[CrawlEvent]) error
+	// CreateIssue creates a new Jira issue and returns its key/id/self URL.
+	// When dry_run is set the server returns the request body it WOULD send
+	// (in dry_run_body) without contacting Jira.
+	CreateIssue(context.Context, *CreateIssueRequest) (*CreateIssueResponse, error)
+	// UpdateIssue edits fields on an existing issue. Honors dry_run like
+	// CreateIssue.
+	UpdateIssue(context.Context, *UpdateIssueRequest) (*UpdateIssueResponse, error)
+	// AddComment appends a comment (plain text, converted to ADF server-side)
+	// to an issue.
+	AddComment(context.Context, *AddCommentRequest) (*AddCommentResponse, error)
+	// ListTransitions lists the workflow transitions currently available for
+	// an issue (id, name, target status).
+	ListTransitions(context.Context, *ListTransitionsRequest) (*ListTransitionsResponse, error)
+	// TransitionIssue moves an issue through a workflow transition, selected
+	// either by transition_id or by target_status_name (resolved server-side
+	// via ListTransitions).
+	TransitionIssue(context.Context, *TransitionIssueRequest) (*TransitionIssueResponse, error)
 	mustEmbedUnimplementedGojiraServer()
 }
 
@@ -135,6 +224,21 @@ func (UnimplementedGojiraServer) GetIssue(context.Context, *GetIssueRequest) (*G
 }
 func (UnimplementedGojiraServer) Crawl(*CrawlRequest, grpc.ServerStreamingServer[CrawlEvent]) error {
 	return status.Errorf(codes.Unimplemented, "method Crawl not implemented")
+}
+func (UnimplementedGojiraServer) CreateIssue(context.Context, *CreateIssueRequest) (*CreateIssueResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateIssue not implemented")
+}
+func (UnimplementedGojiraServer) UpdateIssue(context.Context, *UpdateIssueRequest) (*UpdateIssueResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateIssue not implemented")
+}
+func (UnimplementedGojiraServer) AddComment(context.Context, *AddCommentRequest) (*AddCommentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddComment not implemented")
+}
+func (UnimplementedGojiraServer) ListTransitions(context.Context, *ListTransitionsRequest) (*ListTransitionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTransitions not implemented")
+}
+func (UnimplementedGojiraServer) TransitionIssue(context.Context, *TransitionIssueRequest) (*TransitionIssueResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TransitionIssue not implemented")
 }
 func (UnimplementedGojiraServer) mustEmbedUnimplementedGojiraServer() {}
 func (UnimplementedGojiraServer) testEmbeddedByValue()                {}
@@ -204,6 +308,96 @@ func _Gojira_Crawl_Handler(srv interface{}, stream grpc.ServerStream) error {
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Gojira_CrawlServer = grpc.ServerStreamingServer[CrawlEvent]
 
+func _Gojira_CreateIssue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateIssueRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GojiraServer).CreateIssue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Gojira_CreateIssue_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GojiraServer).CreateIssue(ctx, req.(*CreateIssueRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Gojira_UpdateIssue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateIssueRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GojiraServer).UpdateIssue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Gojira_UpdateIssue_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GojiraServer).UpdateIssue(ctx, req.(*UpdateIssueRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Gojira_AddComment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddCommentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GojiraServer).AddComment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Gojira_AddComment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GojiraServer).AddComment(ctx, req.(*AddCommentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Gojira_ListTransitions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTransitionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GojiraServer).ListTransitions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Gojira_ListTransitions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GojiraServer).ListTransitions(ctx, req.(*ListTransitionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Gojira_TransitionIssue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TransitionIssueRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GojiraServer).TransitionIssue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Gojira_TransitionIssue_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GojiraServer).TransitionIssue(ctx, req.(*TransitionIssueRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Gojira_ServiceDesc is the grpc.ServiceDesc for Gojira service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -218,6 +412,26 @@ var Gojira_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetIssue",
 			Handler:    _Gojira_GetIssue_Handler,
+		},
+		{
+			MethodName: "CreateIssue",
+			Handler:    _Gojira_CreateIssue_Handler,
+		},
+		{
+			MethodName: "UpdateIssue",
+			Handler:    _Gojira_UpdateIssue_Handler,
+		},
+		{
+			MethodName: "AddComment",
+			Handler:    _Gojira_AddComment_Handler,
+		},
+		{
+			MethodName: "ListTransitions",
+			Handler:    _Gojira_ListTransitions_Handler,
+		},
+		{
+			MethodName: "TransitionIssue",
+			Handler:    _Gojira_TransitionIssue_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

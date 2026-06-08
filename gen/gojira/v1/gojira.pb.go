@@ -1830,6 +1830,694 @@ func (x *Summary) GetDurationMs() int64 {
 	return 0
 }
 
+// CreateIssueRequest carries the data to create a new issue. project and
+// issue_type are required; everything else is optional. Advanced or custom
+// fields that lack a dedicated slot here are supplied via raw_fields (each
+// value is a raw JSON string, mirroring the library's WithField escape hatch).
+type CreateIssueRequest struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Project   string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	IssueType string                 `protobuf:"bytes,2,opt,name=issue_type,json=issueType,proto3" json:"issue_type,omitempty"`
+	Summary   string                 `protobuf:"bytes,3,opt,name=summary,proto3" json:"summary,omitempty"`
+	// description is plain text; the server converts it to ADF.
+	Description string   `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
+	Labels      []string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty"`
+	ParentKey   string   `protobuf:"bytes,6,opt,name=parent_key,json=parentKey,proto3" json:"parent_key,omitempty"`
+	// raw_fields maps a Jira field id (e.g. "customfield_10010") to a raw JSON
+	// string value, merged into the issue "fields" object.
+	RawFields map[string]string `protobuf:"bytes,7,rep,name=raw_fields,json=rawFields,proto3" json:"raw_fields,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// dry_run, when true, makes the server return the request body it would send
+	// (in CreateIssueResponse.dry_run_body) without creating an issue.
+	DryRun        bool `protobuf:"varint,8,opt,name=dry_run,json=dryRun,proto3" json:"dry_run,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateIssueRequest) Reset() {
+	*x = CreateIssueRequest{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateIssueRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateIssueRequest) ProtoMessage() {}
+
+func (x *CreateIssueRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateIssueRequest.ProtoReflect.Descriptor instead.
+func (*CreateIssueRequest) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *CreateIssueRequest) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
+}
+
+func (x *CreateIssueRequest) GetIssueType() string {
+	if x != nil {
+		return x.IssueType
+	}
+	return ""
+}
+
+func (x *CreateIssueRequest) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *CreateIssueRequest) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *CreateIssueRequest) GetLabels() []string {
+	if x != nil {
+		return x.Labels
+	}
+	return nil
+}
+
+func (x *CreateIssueRequest) GetParentKey() string {
+	if x != nil {
+		return x.ParentKey
+	}
+	return ""
+}
+
+func (x *CreateIssueRequest) GetRawFields() map[string]string {
+	if x != nil {
+		return x.RawFields
+	}
+	return nil
+}
+
+func (x *CreateIssueRequest) GetDryRun() bool {
+	if x != nil {
+		return x.DryRun
+	}
+	return false
+}
+
+type CreateIssueResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Key   string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Id    string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	Self  string                 `protobuf:"bytes,3,opt,name=self,proto3" json:"self,omitempty"`
+	// dry_run_body is the JSON body the server would have POSTed; set only when
+	// the request had dry_run = true (key/id/self are then empty).
+	DryRunBody    []byte `protobuf:"bytes,4,opt,name=dry_run_body,json=dryRunBody,proto3" json:"dry_run_body,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateIssueResponse) Reset() {
+	*x = CreateIssueResponse{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateIssueResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateIssueResponse) ProtoMessage() {}
+
+func (x *CreateIssueResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateIssueResponse.ProtoReflect.Descriptor instead.
+func (*CreateIssueResponse) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *CreateIssueResponse) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *CreateIssueResponse) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *CreateIssueResponse) GetSelf() string {
+	if x != nil {
+		return x.Self
+	}
+	return ""
+}
+
+func (x *CreateIssueResponse) GetDryRunBody() []byte {
+	if x != nil {
+		return x.DryRunBody
+	}
+	return nil
+}
+
+// UpdateIssueRequest edits fields on an existing issue identified by key.
+type UpdateIssueRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Summary       string                 `protobuf:"bytes,2,opt,name=summary,proto3" json:"summary,omitempty"`
+	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	RawFields     map[string]string      `protobuf:"bytes,4,rep,name=raw_fields,json=rawFields,proto3" json:"raw_fields,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	DryRun        bool                   `protobuf:"varint,5,opt,name=dry_run,json=dryRun,proto3" json:"dry_run,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateIssueRequest) Reset() {
+	*x = UpdateIssueRequest{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateIssueRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateIssueRequest) ProtoMessage() {}
+
+func (x *UpdateIssueRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateIssueRequest.ProtoReflect.Descriptor instead.
+func (*UpdateIssueRequest) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *UpdateIssueRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *UpdateIssueRequest) GetSummary() string {
+	if x != nil {
+		return x.Summary
+	}
+	return ""
+}
+
+func (x *UpdateIssueRequest) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *UpdateIssueRequest) GetRawFields() map[string]string {
+	if x != nil {
+		return x.RawFields
+	}
+	return nil
+}
+
+func (x *UpdateIssueRequest) GetDryRun() bool {
+	if x != nil {
+		return x.DryRun
+	}
+	return false
+}
+
+type UpdateIssueResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	DryRunBody    []byte                 `protobuf:"bytes,2,opt,name=dry_run_body,json=dryRunBody,proto3" json:"dry_run_body,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpdateIssueResponse) Reset() {
+	*x = UpdateIssueResponse{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateIssueResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateIssueResponse) ProtoMessage() {}
+
+func (x *UpdateIssueResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateIssueResponse.ProtoReflect.Descriptor instead.
+func (*UpdateIssueResponse) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *UpdateIssueResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
+func (x *UpdateIssueResponse) GetDryRunBody() []byte {
+	if x != nil {
+		return x.DryRunBody
+	}
+	return nil
+}
+
+// AddCommentRequest appends a comment to an issue. body_text is plain text,
+// converted to ADF server-side.
+type AddCommentRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	BodyText      string                 `protobuf:"bytes,2,opt,name=body_text,json=bodyText,proto3" json:"body_text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddCommentRequest) Reset() {
+	*x = AddCommentRequest{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddCommentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddCommentRequest) ProtoMessage() {}
+
+func (x *AddCommentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddCommentRequest.ProtoReflect.Descriptor instead.
+func (*AddCommentRequest) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *AddCommentRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *AddCommentRequest) GetBodyText() string {
+	if x != nil {
+		return x.BodyText
+	}
+	return ""
+}
+
+type AddCommentResponse struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	AuthorDisplayName string                 `protobuf:"bytes,2,opt,name=author_display_name,json=authorDisplayName,proto3" json:"author_display_name,omitempty"`
+	Created           string                 `protobuf:"bytes,3,opt,name=created,proto3" json:"created,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *AddCommentResponse) Reset() {
+	*x = AddCommentResponse{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddCommentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddCommentResponse) ProtoMessage() {}
+
+func (x *AddCommentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddCommentResponse.ProtoReflect.Descriptor instead.
+func (*AddCommentResponse) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *AddCommentResponse) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *AddCommentResponse) GetAuthorDisplayName() string {
+	if x != nil {
+		return x.AuthorDisplayName
+	}
+	return ""
+}
+
+func (x *AddCommentResponse) GetCreated() string {
+	if x != nil {
+		return x.Created
+	}
+	return ""
+}
+
+type ListTransitionsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTransitionsRequest) Reset() {
+	*x = ListTransitionsRequest{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTransitionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTransitionsRequest) ProtoMessage() {}
+
+func (x *ListTransitionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTransitionsRequest.ProtoReflect.Descriptor instead.
+func (*ListTransitionsRequest) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *ListTransitionsRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+type ListTransitionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Transitions   []*Transition          `protobuf:"bytes,1,rep,name=transitions,proto3" json:"transitions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTransitionsResponse) Reset() {
+	*x = ListTransitionsResponse{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTransitionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTransitionsResponse) ProtoMessage() {}
+
+func (x *ListTransitionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTransitionsResponse.ProtoReflect.Descriptor instead.
+func (*ListTransitionsResponse) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *ListTransitionsResponse) GetTransitions() []*Transition {
+	if x != nil {
+		return x.Transitions
+	}
+	return nil
+}
+
+// Transition is a workflow transition available for an issue.
+type Transition struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name  string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// to_status is the display name of the status the issue moves to.
+	ToStatus      string `protobuf:"bytes,3,opt,name=to_status,json=toStatus,proto3" json:"to_status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Transition) Reset() {
+	*x = Transition{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Transition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Transition) ProtoMessage() {}
+
+func (x *Transition) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Transition.ProtoReflect.Descriptor instead.
+func (*Transition) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *Transition) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *Transition) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Transition) GetToStatus() string {
+	if x != nil {
+		return x.ToStatus
+	}
+	return ""
+}
+
+// TransitionIssueRequest moves an issue. Provide EITHER transition_id OR
+// target_status_name (the server resolves the name to an id via
+// ListTransitions). comment_text, when set, adds a comment as part of the
+// transition.
+type TransitionIssueRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Key              string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	TransitionId     string                 `protobuf:"bytes,2,opt,name=transition_id,json=transitionId,proto3" json:"transition_id,omitempty"`
+	TargetStatusName string                 `protobuf:"bytes,3,opt,name=target_status_name,json=targetStatusName,proto3" json:"target_status_name,omitempty"`
+	CommentText      string                 `protobuf:"bytes,4,opt,name=comment_text,json=commentText,proto3" json:"comment_text,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *TransitionIssueRequest) Reset() {
+	*x = TransitionIssueRequest{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransitionIssueRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransitionIssueRequest) ProtoMessage() {}
+
+func (x *TransitionIssueRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransitionIssueRequest.ProtoReflect.Descriptor instead.
+func (*TransitionIssueRequest) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *TransitionIssueRequest) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *TransitionIssueRequest) GetTransitionId() string {
+	if x != nil {
+		return x.TransitionId
+	}
+	return ""
+}
+
+func (x *TransitionIssueRequest) GetTargetStatusName() string {
+	if x != nil {
+		return x.TargetStatusName
+	}
+	return ""
+}
+
+func (x *TransitionIssueRequest) GetCommentText() string {
+	if x != nil {
+		return x.CommentText
+	}
+	return ""
+}
+
+type TransitionIssueResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TransitionIssueResponse) Reset() {
+	*x = TransitionIssueResponse{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TransitionIssueResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TransitionIssueResponse) ProtoMessage() {}
+
+func (x *TransitionIssueResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TransitionIssueResponse.ProtoReflect.Descriptor instead.
+func (*TransitionIssueResponse) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *TransitionIssueResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
 var File_gojira_v1_gojira_proto protoreflect.FileDescriptor
 
 const file_gojira_v1_gojira_proto_rawDesc = "" +
@@ -1990,16 +2678,80 @@ const file_gojira_v1_gojira_proto_rawDesc = "" +
 	"durationMs\x1a=\n" +
 	"\x0fFailedKeysEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\x7f\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe4\x02\n" +
+	"\x12CreateIssueRequest\x12\x18\n" +
+	"\aproject\x18\x01 \x01(\tR\aproject\x12\x1d\n" +
+	"\n" +
+	"issue_type\x18\x02 \x01(\tR\tissueType\x12\x18\n" +
+	"\asummary\x18\x03 \x01(\tR\asummary\x12 \n" +
+	"\vdescription\x18\x04 \x01(\tR\vdescription\x12\x16\n" +
+	"\x06labels\x18\x05 \x03(\tR\x06labels\x12\x1d\n" +
+	"\n" +
+	"parent_key\x18\x06 \x01(\tR\tparentKey\x12K\n" +
+	"\n" +
+	"raw_fields\x18\a \x03(\v2,.gojira.v1.CreateIssueRequest.RawFieldsEntryR\trawFields\x12\x17\n" +
+	"\adry_run\x18\b \x01(\bR\x06dryRun\x1a<\n" +
+	"\x0eRawFieldsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"m\n" +
+	"\x13CreateIssueResponse\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x0e\n" +
+	"\x02id\x18\x02 \x01(\tR\x02id\x12\x12\n" +
+	"\x04self\x18\x03 \x01(\tR\x04self\x12 \n" +
+	"\fdry_run_body\x18\x04 \x01(\fR\n" +
+	"dryRunBody\"\x86\x02\n" +
+	"\x12UpdateIssueRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x18\n" +
+	"\asummary\x18\x02 \x01(\tR\asummary\x12 \n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\x12K\n" +
+	"\n" +
+	"raw_fields\x18\x04 \x03(\v2,.gojira.v1.UpdateIssueRequest.RawFieldsEntryR\trawFields\x12\x17\n" +
+	"\adry_run\x18\x05 \x01(\bR\x06dryRun\x1a<\n" +
+	"\x0eRawFieldsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"G\n" +
+	"\x13UpdateIssueResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\x12 \n" +
+	"\fdry_run_body\x18\x02 \x01(\fR\n" +
+	"dryRunBody\"B\n" +
+	"\x11AddCommentRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x1b\n" +
+	"\tbody_text\x18\x02 \x01(\tR\bbodyText\"n\n" +
+	"\x12AddCommentResponse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12.\n" +
+	"\x13author_display_name\x18\x02 \x01(\tR\x11authorDisplayName\x12\x18\n" +
+	"\acreated\x18\x03 \x01(\tR\acreated\"*\n" +
+	"\x16ListTransitionsRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\"R\n" +
+	"\x17ListTransitionsResponse\x127\n" +
+	"\vtransitions\x18\x01 \x03(\v2\x15.gojira.v1.TransitionR\vtransitions\"M\n" +
+	"\n" +
+	"Transition\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1b\n" +
+	"\tto_status\x18\x03 \x01(\tR\btoStatus\"\xa0\x01\n" +
+	"\x16TransitionIssueRequest\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12#\n" +
+	"\rtransition_id\x18\x02 \x01(\tR\ftransitionId\x12,\n" +
+	"\x12target_status_name\x18\x03 \x01(\tR\x10targetStatusName\x12!\n" +
+	"\fcomment_text\x18\x04 \x01(\tR\vcommentText\")\n" +
+	"\x17TransitionIssueResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok*\x7f\n" +
 	"\fOutputFormat\x12\x1d\n" +
 	"\x19OUTPUT_FORMAT_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18OUTPUT_FORMAT_STRUCTURED\x10\x01\x12\x1a\n" +
 	"\x16OUTPUT_FORMAT_MARKDOWN\x10\x02\x12\x16\n" +
-	"\x12OUTPUT_FORMAT_JSON\x10\x032\xcd\x01\n" +
+	"\x12OUTPUT_FORMAT_JSON\x10\x032\xe8\x04\n" +
 	"\x06Gojira\x12C\n" +
 	"\bClassify\x12\x1a.gojira.v1.ClassifyRequest\x1a\x1b.gojira.v1.ClassifyResponse\x12C\n" +
 	"\bGetIssue\x12\x1a.gojira.v1.GetIssueRequest\x1a\x1b.gojira.v1.GetIssueResponse\x129\n" +
-	"\x05Crawl\x12\x17.gojira.v1.CrawlRequest\x1a\x15.gojira.v1.CrawlEvent0\x01B\x95\x01\n" +
+	"\x05Crawl\x12\x17.gojira.v1.CrawlRequest\x1a\x15.gojira.v1.CrawlEvent0\x01\x12L\n" +
+	"\vCreateIssue\x12\x1d.gojira.v1.CreateIssueRequest\x1a\x1e.gojira.v1.CreateIssueResponse\x12L\n" +
+	"\vUpdateIssue\x12\x1d.gojira.v1.UpdateIssueRequest\x1a\x1e.gojira.v1.UpdateIssueResponse\x12I\n" +
+	"\n" +
+	"AddComment\x12\x1c.gojira.v1.AddCommentRequest\x1a\x1d.gojira.v1.AddCommentResponse\x12X\n" +
+	"\x0fListTransitions\x12!.gojira.v1.ListTransitionsRequest\x1a\".gojira.v1.ListTransitionsResponse\x12X\n" +
+	"\x0fTransitionIssue\x12!.gojira.v1.TransitionIssueRequest\x1a\".gojira.v1.TransitionIssueResponseB\x95\x01\n" +
 	"\rcom.gojira.v1B\vGojiraProtoP\x01Z2github.com/neumachen/gojira/gen/gojira/v1;gojirav1\xa2\x02\x03GXX\xaa\x02\tGojira.V1\xca\x02\tGojira\\V1\xe2\x02\x15Gojira\\V1\\GPBMetadata\xea\x02\n" +
 	"Gojira::V1b\x06proto3"
 
@@ -2016,41 +2768,54 @@ func file_gojira_v1_gojira_proto_rawDescGZIP() []byte {
 }
 
 var file_gojira_v1_gojira_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_gojira_v1_gojira_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_gojira_v1_gojira_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_gojira_v1_gojira_proto_goTypes = []any{
-	(OutputFormat)(0),             // 0: gojira.v1.OutputFormat
-	(CrawlEvent_Kind)(0),          // 1: gojira.v1.CrawlEvent.Kind
-	(*ClassifyRequest)(nil),       // 2: gojira.v1.ClassifyRequest
-	(*ClassifyResponse)(nil),      // 3: gojira.v1.ClassifyResponse
-	(*GetIssueRequest)(nil),       // 4: gojira.v1.GetIssueRequest
-	(*GetIssueResponse)(nil),      // 5: gojira.v1.GetIssueResponse
-	(*Issue)(nil),                 // 6: gojira.v1.Issue
-	(*LinkedIssueRef)(nil),        // 7: gojira.v1.LinkedIssueRef
-	(*IssueLinkRef)(nil),          // 8: gojira.v1.IssueLinkRef
-	(*RemoteLinkRef)(nil),         // 9: gojira.v1.RemoteLinkRef
-	(*DevStatusData)(nil),         // 10: gojira.v1.DevStatusData
-	(*PullRequestRef)(nil),        // 11: gojira.v1.PullRequestRef
-	(*BranchRef)(nil),             // 12: gojira.v1.BranchRef
-	(*CommitRef)(nil),             // 13: gojira.v1.CommitRef
-	(*RepositoryRef)(nil),         // 14: gojira.v1.RepositoryRef
-	(*BuildRef)(nil),              // 15: gojira.v1.BuildRef
-	(*Reference)(nil),             // 16: gojira.v1.Reference
-	(*CrawlRequest)(nil),          // 17: gojira.v1.CrawlRequest
-	(*CrawlEvent)(nil),            // 18: gojira.v1.CrawlEvent
-	(*Summary)(nil),               // 19: gojira.v1.Summary
-	nil,                           // 20: gojira.v1.Issue.CustomFieldsEntry
-	nil,                           // 21: gojira.v1.Summary.FailedKeysEntry
-	(*timestamppb.Timestamp)(nil), // 22: google.protobuf.Timestamp
+	(OutputFormat)(0),               // 0: gojira.v1.OutputFormat
+	(CrawlEvent_Kind)(0),            // 1: gojira.v1.CrawlEvent.Kind
+	(*ClassifyRequest)(nil),         // 2: gojira.v1.ClassifyRequest
+	(*ClassifyResponse)(nil),        // 3: gojira.v1.ClassifyResponse
+	(*GetIssueRequest)(nil),         // 4: gojira.v1.GetIssueRequest
+	(*GetIssueResponse)(nil),        // 5: gojira.v1.GetIssueResponse
+	(*Issue)(nil),                   // 6: gojira.v1.Issue
+	(*LinkedIssueRef)(nil),          // 7: gojira.v1.LinkedIssueRef
+	(*IssueLinkRef)(nil),            // 8: gojira.v1.IssueLinkRef
+	(*RemoteLinkRef)(nil),           // 9: gojira.v1.RemoteLinkRef
+	(*DevStatusData)(nil),           // 10: gojira.v1.DevStatusData
+	(*PullRequestRef)(nil),          // 11: gojira.v1.PullRequestRef
+	(*BranchRef)(nil),               // 12: gojira.v1.BranchRef
+	(*CommitRef)(nil),               // 13: gojira.v1.CommitRef
+	(*RepositoryRef)(nil),           // 14: gojira.v1.RepositoryRef
+	(*BuildRef)(nil),                // 15: gojira.v1.BuildRef
+	(*Reference)(nil),               // 16: gojira.v1.Reference
+	(*CrawlRequest)(nil),            // 17: gojira.v1.CrawlRequest
+	(*CrawlEvent)(nil),              // 18: gojira.v1.CrawlEvent
+	(*Summary)(nil),                 // 19: gojira.v1.Summary
+	(*CreateIssueRequest)(nil),      // 20: gojira.v1.CreateIssueRequest
+	(*CreateIssueResponse)(nil),     // 21: gojira.v1.CreateIssueResponse
+	(*UpdateIssueRequest)(nil),      // 22: gojira.v1.UpdateIssueRequest
+	(*UpdateIssueResponse)(nil),     // 23: gojira.v1.UpdateIssueResponse
+	(*AddCommentRequest)(nil),       // 24: gojira.v1.AddCommentRequest
+	(*AddCommentResponse)(nil),      // 25: gojira.v1.AddCommentResponse
+	(*ListTransitionsRequest)(nil),  // 26: gojira.v1.ListTransitionsRequest
+	(*ListTransitionsResponse)(nil), // 27: gojira.v1.ListTransitionsResponse
+	(*Transition)(nil),              // 28: gojira.v1.Transition
+	(*TransitionIssueRequest)(nil),  // 29: gojira.v1.TransitionIssueRequest
+	(*TransitionIssueResponse)(nil), // 30: gojira.v1.TransitionIssueResponse
+	nil,                             // 31: gojira.v1.Issue.CustomFieldsEntry
+	nil,                             // 32: gojira.v1.Summary.FailedKeysEntry
+	nil,                             // 33: gojira.v1.CreateIssueRequest.RawFieldsEntry
+	nil,                             // 34: gojira.v1.UpdateIssueRequest.RawFieldsEntry
+	(*timestamppb.Timestamp)(nil),   // 35: google.protobuf.Timestamp
 }
 var file_gojira_v1_gojira_proto_depIdxs = []int32{
 	0,  // 0: gojira.v1.GetIssueRequest.format:type_name -> gojira.v1.OutputFormat
 	6,  // 1: gojira.v1.GetIssueResponse.issue:type_name -> gojira.v1.Issue
-	22, // 2: gojira.v1.Issue.created:type_name -> google.protobuf.Timestamp
-	22, // 3: gojira.v1.Issue.updated:type_name -> google.protobuf.Timestamp
+	35, // 2: gojira.v1.Issue.created:type_name -> google.protobuf.Timestamp
+	35, // 3: gojira.v1.Issue.updated:type_name -> google.protobuf.Timestamp
 	7,  // 4: gojira.v1.Issue.subtasks:type_name -> gojira.v1.LinkedIssueRef
 	8,  // 5: gojira.v1.Issue.issue_links:type_name -> gojira.v1.IssueLinkRef
 	9,  // 6: gojira.v1.Issue.remote_links:type_name -> gojira.v1.RemoteLinkRef
-	20, // 7: gojira.v1.Issue.custom_fields:type_name -> gojira.v1.Issue.CustomFieldsEntry
+	31, // 7: gojira.v1.Issue.custom_fields:type_name -> gojira.v1.Issue.CustomFieldsEntry
 	16, // 8: gojira.v1.Issue.references:type_name -> gojira.v1.Reference
 	10, // 9: gojira.v1.Issue.dev_status:type_name -> gojira.v1.DevStatusData
 	7,  // 10: gojira.v1.IssueLinkRef.issue:type_name -> gojira.v1.LinkedIssueRef
@@ -2059,22 +2824,35 @@ var file_gojira_v1_gojira_proto_depIdxs = []int32{
 	13, // 13: gojira.v1.DevStatusData.commits:type_name -> gojira.v1.CommitRef
 	14, // 14: gojira.v1.DevStatusData.repositories:type_name -> gojira.v1.RepositoryRef
 	15, // 15: gojira.v1.DevStatusData.builds:type_name -> gojira.v1.BuildRef
-	22, // 16: gojira.v1.CommitRef.timestamp:type_name -> google.protobuf.Timestamp
+	35, // 16: gojira.v1.CommitRef.timestamp:type_name -> google.protobuf.Timestamp
 	1,  // 17: gojira.v1.CrawlEvent.kind:type_name -> gojira.v1.CrawlEvent.Kind
-	22, // 18: gojira.v1.CrawlEvent.timestamp:type_name -> google.protobuf.Timestamp
+	35, // 18: gojira.v1.CrawlEvent.timestamp:type_name -> google.protobuf.Timestamp
 	19, // 19: gojira.v1.CrawlEvent.summary:type_name -> gojira.v1.Summary
-	21, // 20: gojira.v1.Summary.failed_keys:type_name -> gojira.v1.Summary.FailedKeysEntry
-	2,  // 21: gojira.v1.Gojira.Classify:input_type -> gojira.v1.ClassifyRequest
-	4,  // 22: gojira.v1.Gojira.GetIssue:input_type -> gojira.v1.GetIssueRequest
-	17, // 23: gojira.v1.Gojira.Crawl:input_type -> gojira.v1.CrawlRequest
-	3,  // 24: gojira.v1.Gojira.Classify:output_type -> gojira.v1.ClassifyResponse
-	5,  // 25: gojira.v1.Gojira.GetIssue:output_type -> gojira.v1.GetIssueResponse
-	18, // 26: gojira.v1.Gojira.Crawl:output_type -> gojira.v1.CrawlEvent
-	24, // [24:27] is the sub-list for method output_type
-	21, // [21:24] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	32, // 20: gojira.v1.Summary.failed_keys:type_name -> gojira.v1.Summary.FailedKeysEntry
+	33, // 21: gojira.v1.CreateIssueRequest.raw_fields:type_name -> gojira.v1.CreateIssueRequest.RawFieldsEntry
+	34, // 22: gojira.v1.UpdateIssueRequest.raw_fields:type_name -> gojira.v1.UpdateIssueRequest.RawFieldsEntry
+	28, // 23: gojira.v1.ListTransitionsResponse.transitions:type_name -> gojira.v1.Transition
+	2,  // 24: gojira.v1.Gojira.Classify:input_type -> gojira.v1.ClassifyRequest
+	4,  // 25: gojira.v1.Gojira.GetIssue:input_type -> gojira.v1.GetIssueRequest
+	17, // 26: gojira.v1.Gojira.Crawl:input_type -> gojira.v1.CrawlRequest
+	20, // 27: gojira.v1.Gojira.CreateIssue:input_type -> gojira.v1.CreateIssueRequest
+	22, // 28: gojira.v1.Gojira.UpdateIssue:input_type -> gojira.v1.UpdateIssueRequest
+	24, // 29: gojira.v1.Gojira.AddComment:input_type -> gojira.v1.AddCommentRequest
+	26, // 30: gojira.v1.Gojira.ListTransitions:input_type -> gojira.v1.ListTransitionsRequest
+	29, // 31: gojira.v1.Gojira.TransitionIssue:input_type -> gojira.v1.TransitionIssueRequest
+	3,  // 32: gojira.v1.Gojira.Classify:output_type -> gojira.v1.ClassifyResponse
+	5,  // 33: gojira.v1.Gojira.GetIssue:output_type -> gojira.v1.GetIssueResponse
+	18, // 34: gojira.v1.Gojira.Crawl:output_type -> gojira.v1.CrawlEvent
+	21, // 35: gojira.v1.Gojira.CreateIssue:output_type -> gojira.v1.CreateIssueResponse
+	23, // 36: gojira.v1.Gojira.UpdateIssue:output_type -> gojira.v1.UpdateIssueResponse
+	25, // 37: gojira.v1.Gojira.AddComment:output_type -> gojira.v1.AddCommentResponse
+	27, // 38: gojira.v1.Gojira.ListTransitions:output_type -> gojira.v1.ListTransitionsResponse
+	30, // 39: gojira.v1.Gojira.TransitionIssue:output_type -> gojira.v1.TransitionIssueResponse
+	32, // [32:40] is the sub-list for method output_type
+	24, // [24:32] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_gojira_v1_gojira_proto_init() }
@@ -2096,7 +2874,7 @@ func file_gojira_v1_gojira_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gojira_v1_gojira_proto_rawDesc), len(file_gojira_v1_gojira_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   20,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

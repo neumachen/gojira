@@ -134,6 +134,15 @@ code is committed under `gen/gojira/v1/`. After editing the proto, run:
 This runs `buf lint` then `buf generate`. Commit the regenerated
 `*.pb.go` and `*_grpc.pb.go` files alongside the proto change.
 
+### Write operations
+
+The gRPC service now exposes write operations (CreateIssue, UpdateIssue,
+AddComment, ListTransitions, TransitionIssue) in addition to the read RPCs.
+Writes use the server's single-tenant identity, support a dry-run preview for
+create/update, and surface Jira field-level validation errors. Issue deletion
+is intentionally unsupported. Per AGENTS guardrails, treat write operations as
+mutating actions.
+
 ## AiderDesk workflow
 
 Use small, focused implementation slices.

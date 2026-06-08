@@ -285,6 +285,80 @@ The four named library capabilities (`Classify`, `LoadConfig`,
 `Summary`, `Sink`, and `Event` are documented in
 [`gojira.go`](./gojira.go)'s package doc.
 
+## gRPC service (`gojira serve`)
+
+In addition to the one-shot `crawl` subcommand, gojira can run as a
+long-lived gRPC server that exposes its crawl and fetch capabilities to
+other front-ends (e.g. a TUI or an MCP server).
+
+```bash
+# Start the server (reads the same GOJIRA_* config as `crawl`).
+export GOJIRA_SITE="https://your-site.atlassian.net"
+export GOJIRA_USER="you@example.com"
+export GOJIRA_TOKEN="<api-token>"
+gojira serve --address 127.0.0.1:50051
+```
+
+The server is **single-tenant**: one Jira identity is loaded at startup
+from the same configuration cascade as `crawl`. It accepts concurrent
+clients (each RPC is isolated) and is intended for a loopback or
+otherwise trusted network — Phase 1 ships **no TLS and no
+authentication**.
+
+### Service `gojira.v1.Gojira`
+
+| RPC | Type | Description |
+| --- | ---- | ----------- |
+| `Classify` | unary | Classify a bare key or URL into `JiraKey`, `JiraURL`, `GitHubPR`, or `External`. |
+| `GetIssue` | unary | Fetch one issue. The response is a structured proto `Issue`, rendered Markdown, or JSON, selected by the request's `OutputFormat` (`STRUCTURED`, `MARKDOWN`, `JSON`). |
+| `Crawl` | server-streaming | Recursively crawl from one or more start keys, streaming a `CrawlEvent` for each state transition. Issue content is written server-side to the configured output directory (streaming content over the wire is deferred to Phase 2). |
+
+The proto contract is defined in
+[`proto/gojira/v1/gojira.proto`](./proto/gojira/v1/gojira.proto) and the
+generated Go bindings live under `gen/gojira/v1/`.
+
+### Server configuration
+
+| Flag | Env var | Default | Description |
+| ---- | ------- | ------- | ----------- |
+| `--address` | `GOJIRA_SERVER_ADDRESS` | `127.0.0.1:50051` | gRPC server bind address. |
+| `--config` | `GOJIRA_CONFIG_FILE` | (discovered) | Path to a YAML config file. |
+| `--site` | `GOJIRA_SITE` | (required) | Jira Cloud site URL. |
+| `--user` | `GOJIRA_USER` | (required) | Atlassian account email. |
+| `--token` | `GOJIRA_TOKEN` | (required) | Atlassian API token. |
+| `--output-dir` | `GOJIRA_OUTPUT_DIR` | `./out` | Output root directory for `Crawl`. |
+| `--log-level` | `GOJIRA_LOG_LEVEL` | `info` | One of `error`, `warn`, `info`, `debug`. |
+| `--log-format` | `GOJIRA_LOG_FORMAT` | `text` | One of `text`, `json`. |
+
+The server address can also be set in the YAML config file:
+
+```yaml
+server:
+  address: 127.0.0.1:50051
+```
+
+The server stops gracefully on `SIGINT`/`SIGTERM`.
+
+### Reference client
+
+A minimal reference client ships at `cmd/gojira-client` for smoke-testing
+a running server. It is a reference tool, not a production front-end.
+
+```bash
+go run ./cmd/gojira-client -address 127.0.0.1:50051 -classify PLATENG-1147
+go run ./cmd/gojira-client -address 127.0.0.1:50051 -key PLATENG-1147 -format markdown
+go run ./cmd/gojira-client -address 127.0.0.1:50051 -crawl PLATENG-1147
+```
+
+### Regenerating the proto bindings
+
+The generated code under `gen/` is committed. To regenerate after editing
+the proto contract, run [buf](https://buf.build):
+
+```bash
+./scripts/gen-proto.sh   # runs `buf lint` then `buf generate`
+```
+
 ## Known limitations (v0.1.0)
 
 - Jira Cloud only. Jira Server / Data Center is out of scope for
@@ -295,12 +369,17 @@ The four named library capabilities (`Classify`, `LoadConfig`,
   semi-undocumented. It has been stable for ~10 years because
   Atlassian's UI uses it, but no SLA is offered. Disable with
   `--include-dev-status=false` to opt out.
-- The CLI ships only one subcommand: `crawl`. See the roadmap.
+- The gRPC service (`gojira serve`) is single-tenant and ships without TLS or authentication; run it only on a loopback or trusted network. Streaming issue content over the wire, multi-tenancy, per-request config overrides, and TLS/auth are deferred to Phase 2.
 
 ## Roadmap
 
 Future releases anticipated:
 
+- Front-ends over the gRPC API: a terminal UI (TUI) and a Model
+  Context Protocol (MCP) server, both as gRPC clients.
+- Phase 2 service work: streaming rendered issue content over the
+  wire, multi-tenant identities, per-request configuration
+  overrides, and TLS/authentication.
 - `gojira fetch` — targeted single-issue (or small-list) retrieval
   without recursive expansion. The same renderer; just no JQL
   parent search and no descent into linked issues.

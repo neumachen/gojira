@@ -122,6 +122,18 @@ If these scripts are not executable, run:
 chmod +x scripts/aider-lint-go.sh scripts/aider-test.sh
 ```
 
+### Proto codegen
+
+The gRPC contract lives in `proto/gojira/v1/gojira.proto`; generated Go
+code is committed under `gen/gojira/v1/`. After editing the proto, run:
+
+```bash
+./scripts/gen-proto.sh
+```
+
+This runs `buf lint` then `buf generate`. Commit the regenerated
+`*.pb.go` and `*_grpc.pb.go` files alongside the proto change.
+
 ## AiderDesk workflow
 
 Use small, focused implementation slices.

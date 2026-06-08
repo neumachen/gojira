@@ -1,8 +1,11 @@
 package fetch_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -150,4 +153,76 @@ func TestNewFromConfig_InvalidSite(t *testing.T) {
 	f, err := fetch.NewFromConfig(cfg)
 	require.Error(t, err, "expected error for empty Site")
 	assert.Nil(t, f, "expected nil *ClientFetcher on error")
+}
+
+// ---------------------------------------------------------------------------
+// phase-d-thread-1: client.WithLogger forwards through fetch.NewFromConfig
+// ---------------------------------------------------------------------------
+
+// TestNewFromConfig_WithLogger_EmitsHTTPLogs is the focused integration
+// check that the fetch package's existing variadic-Option passthrough
+// is enough to surface gojira observability: forwarding client.WithLogger
+// into NewFromConfig must result in the httplog RoundTripper being
+// installed on the underlying client, so Fetch produces the expected
+// INFO http.response measurement line.
+//
+// No production-code change in fetch is needed for this to work — this
+// test pins the behavior so a future refactor cannot silently break the
+// observability seam.
+func TestNewFromConfig_WithLogger_EmitsHTTPLogs(t *testing.T) {
+	// Capture log output via a JSON handler over a bytes.Buffer so we
+	// can parse and assert on the structured attrs the httplog
+	// RoundTripper emits.
+	var buf bytes.Buffer
+	lg := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	// An httptest server returning a minimal valid Jira issue JSON so
+	// the fetch path (GetIssue under the hood) does not fail at the
+	// transport layer. fetch only cares about the raw bytes and the
+	// status code, so any JSON body works.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"key":"EX-1"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := config.Config{
+		Site:  srv.URL,
+		User:  "alice",
+		Token: "secret-token-abc",
+	}
+
+	f, err := fetch.NewFromConfig(cfg,
+		client.WithHTTPClient(srv.Client()),
+		client.WithLogger(lg),
+	)
+	require.NoError(t, err)
+
+	_, err = f.Fetch(context.Background(), "EX-1")
+	require.NoError(t, err)
+
+	// Parse JSON lines and find the http.response record from the
+	// httplog RoundTripper. Tolerant of unrelated records so future
+	// observability surface additions do not regress this test.
+	dec := json.NewDecoder(bytes.NewReader(buf.Bytes()))
+	var found bool
+	for {
+		var rec map[string]any
+		if err := dec.Decode(&rec); err != nil {
+			break
+		}
+		if rec["msg"] != "http.response" {
+			continue
+		}
+		found = true
+		assert.Equal(t, "INFO", rec["level"], "http.response should be INFO")
+		assert.Equal(t, "response", rec["trace_stream"], "trace_stream attr should be \"response\"")
+		assert.Equal(t, "GET", rec["http_method"], "method should be GET")
+		// JSON numbers decode as float64 in a generic map.
+		assert.EqualValues(t, http.StatusOK, rec["status"], "status should be 200")
+	}
+	assert.True(t, found,
+		"expected at least one http.response record from the httplog RoundTripper; buf:\n%s",
+		buf.String())
 }

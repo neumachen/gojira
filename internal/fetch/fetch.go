@@ -58,7 +58,10 @@ func New(c *client.Client) *ClientFetcher {
 // that do not need to share the underlying client with other components.
 //
 // Any client.Option values (e.g. WithHTTPClient for tests) are forwarded
-// to client.New unchanged.
+// to client.New unchanged. In addition, client.WithLogger and
+// client.WithRoundTripper are commonly forwarded by the crawl observability
+// instrument to install the httplog RoundTripper around the underlying
+// client's transport; both flow through this variadic unchanged.
 func NewFromConfig(cfg config.Config, opts ...client.Option) (*ClientFetcher, error) {
 	c, err := client.New(cfg, opts...)
 	if err != nil {

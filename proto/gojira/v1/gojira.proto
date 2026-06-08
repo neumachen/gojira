@@ -1,0 +1,497 @@
+syntax = "proto3";
+
+package gojira.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/neumachen/gojira/gen/gojira/v1;gojirav1";
+
+// Gojira is the gRPC service that exposes gojira's core capabilities:
+// link classification, single-issue fetch, and recursive crawl.
+//
+// The server is single-tenant (one Jira identity loaded at startup) and
+// serves multiple concurrent clients. Each RPC gets its own per-stream
+// Sink and Store so concurrent crawls never cross streams.
+service Gojira {
+  // Classify classifies a link or string into one of four kinds:
+  // JiraKey, JiraURL, GitHubPR, or External.
+  rpc Classify(ClassifyRequest) returns (ClassifyResponse);
+
+  // GetIssue fetches, parses, and returns a single Jira issue in the
+  // requested output format (structured, Markdown, or JSON).
+  rpc GetIssue(GetIssueRequest) returns (GetIssueResponse);
+
+  // Crawl runs a recursive crawl starting from the given issue keys and
+  // streams CrawlEvent messages (progress events + a final Summary) back
+  // to the caller. Crawl content is persisted server-side via FSStore;
+  // per-issue content over the wire is available on demand via GetIssue.
+  rpc Crawl(CrawlRequest) returns (stream CrawlEvent);
+}
+
+// ---------------------------------------------------------------------------
+// Classify RPC
+// ---------------------------------------------------------------------------
+
+// ClassifyRequest carries the input string to classify and the Jira site
+// base URL used for Jira URL matching.
+message ClassifyRequest {
+  // input is the string to classify (bare issue key, URL, etc.).
+  string input = 1;
+
+  // jira_site is the Jira Cloud base URL, e.g. "https://mycompany.atlassian.net".
+  // Only the host portion is used for matching. Empty means no input will be
+  // classified as JIRA_URL.
+  string jira_site = 2;
+}
+
+// ClassifyResponse mirrors classify.Result.
+message ClassifyResponse {
+  // kind is the classification result: one of "JiraKey", "JiraURL",
+  // "GitHubPR", or "External". Matches classify.Kind.String() values.
+  string kind = 1;
+
+  // issue_key is the Jira issue key (e.g. "EXAMPLE-1").
+  // Set when kind is "JiraKey" or "JiraURL".
+  string issue_key = 2;
+
+  // owner is the GitHub repository owner.
+  // Set when kind is "GitHubPR".
+  string owner = 3;
+
+  // repo is the GitHub repository name.
+  // Set when kind is "GitHubPR".
+  string repo = 4;
+
+  // pr_number is the GitHub pull request number.
+  // Set when kind is "GitHubPR".
+  int32 pr_number = 5;
+
+  // url is the raw URL string when the input was recognised as a URL.
+  // Set when kind is "JiraURL", "GitHubPR", or "External" (when parseable).
+  string url = 6;
+}
+
+// ---------------------------------------------------------------------------
+// GetIssue RPC
+// ---------------------------------------------------------------------------
+
+// OutputFormat selects the presentation format for GetIssue.
+enum OutputFormat {
+  // OUTPUT_FORMAT_UNSPECIFIED is the zero value; the server treats it as
+  // OUTPUT_FORMAT_STRUCTURED.
+  OUTPUT_FORMAT_UNSPECIFIED = 0;
+
+  // OUTPUT_FORMAT_STRUCTURED returns the parsed Issue message with all
+  // typed fields populated. No rendering is applied.
+  OUTPUT_FORMAT_STRUCTURED = 1;
+
+  // OUTPUT_FORMAT_MARKDOWN returns the issue rendered as a Markdown string
+  // (the same content written to <KEY>/index.md by the CLI).
+  OUTPUT_FORMAT_MARKDOWN = 2;
+
+  // OUTPUT_FORMAT_JSON returns the issue serialised as a JSON string.
+  OUTPUT_FORMAT_JSON = 3;
+}
+
+// GetIssueRequest identifies the issue to fetch and the desired output format.
+message GetIssueRequest {
+  // key is the Jira issue key, e.g. "PLATENG-1147".
+  string key = 1;
+
+  // format selects the presentation format for the response.
+  OutputFormat format = 2;
+}
+
+// GetIssueResponse carries the issue in the requested format.
+// Exactly one of the oneof fields is set, matching the requested OutputFormat.
+message GetIssueResponse {
+  oneof result {
+    // issue is set when format is OUTPUT_FORMAT_STRUCTURED (or UNSPECIFIED).
+    Issue issue = 1;
+
+    // markdown is set when format is OUTPUT_FORMAT_MARKDOWN.
+    string markdown = 2;
+
+    // json is set when format is OUTPUT_FORMAT_JSON.
+    string json = 3;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Issue message — mirrors parse.Issue
+// ---------------------------------------------------------------------------
+
+// Issue is the structured representation of a Jira Cloud issue.
+// It mirrors parse.Issue; fields not available in the REST response are
+// zero-valued.
+message Issue {
+  // key is the Jira issue key, e.g. "EXAMPLE-1".
+  string key = 1;
+
+  // numeric_id is the opaque integer ID Jira assigns to each issue
+  // (the top-level "id" field of the GET /issue/<KEY> response).
+  // Required by the Dev Status endpoint (/rest/dev-status/1.0/issue/detail).
+  string numeric_id = 2;
+
+  // summary is the one-line issue title.
+  string summary = 3;
+
+  // status is the display name of the issue status, e.g. "In Progress".
+  string status = 4;
+
+  // issue_type is the display name of the issue type, e.g. "Story".
+  string issue_type = 5;
+
+  // project is the Jira project key, e.g. "PLATENG".
+  string project = 6;
+
+  // assignee is the display name of the assignee, or empty if unassigned.
+  string assignee = 7;
+
+  // reporter is the display name of the reporter.
+  string reporter = 8;
+
+  // created is the issue creation timestamp.
+  google.protobuf.Timestamp created = 9;
+
+  // updated is the timestamp of the most recent issue update.
+  google.protobuf.Timestamp updated = 10;
+
+  // source_url is the canonical Jira browse URL for this issue,
+  // e.g. "https://example.atlassian.net/browse/EXAMPLE-1".
+  string source_url = 11;
+
+  // description_placeholder is reserved for a future ADF-to-proto
+  // representation of the issue description. For now, callers should
+  // use OUTPUT_FORMAT_MARKDOWN or OUTPUT_FORMAT_JSON to access the
+  // rendered description.
+  // reserved 12; // description (ADF → proto, future)
+  string description_placeholder = 12;
+
+  // parent_key is the key of the direct parent issue, or empty if none.
+  string parent_key = 13;
+
+  // subtasks lists the direct child subtasks (legacy Jira Sub-task type).
+  repeated LinkedIssueRef subtasks = 14;
+
+  // children lists the modern Jira hierarchy child keys discovered via
+  // JQL search (parent = "KEY"). Populated by the crawl orchestrator.
+  repeated string children = 15;
+
+  // issue_links lists the explicit Jira issue links (blocks, relates to, etc.).
+  repeated IssueLinkRef issue_links = 16;
+
+  // remote_links lists the remote (external) links attached to this issue.
+  repeated RemoteLinkRef remote_links = 17;
+
+  // custom_fields preserves every "customfield_*" key from the Jira fields
+  // object that does not have a dedicated typed slot above. Values are raw
+  // JSON strings so no information is lost.
+  map<string, string> custom_fields = 18;
+
+  // references lists all outbound references discovered by extract.Extract,
+  // including description links, relationship links, and remote links.
+  repeated Reference references = 19;
+
+  // dev_status holds the development metadata associated with this issue,
+  // discovered via Jira's Dev Status API.
+  DevStatusData dev_status = 20;
+}
+
+// LinkedIssueRef is a lightweight reference to a linked Jira issue,
+// used for subtasks and issue links. Mirrors parse.LinkedIssue.
+message LinkedIssueRef {
+  // key is the Jira issue key of the linked issue.
+  string key = 1;
+
+  // summary is the one-line title of the linked issue.
+  string summary = 2;
+
+  // status is the display name of the linked issue's status.
+  string status = 3;
+}
+
+// IssueLinkRef represents an explicit Jira issue link (blocks, relates to, etc.).
+// Mirrors parse.IssueLink.
+message IssueLinkRef {
+  // direction is "inward" or "outward".
+  string direction = 1;
+
+  // link_type is the display name of the link type, e.g. "Blocks".
+  string link_type = 2;
+
+  // issue is the linked issue reference.
+  LinkedIssueRef issue = 3;
+}
+
+// RemoteLinkRef represents a remote (external) link attached to a Jira issue.
+// Mirrors parse.RemoteLink.
+message RemoteLinkRef {
+  // title is the display title of the remote link.
+  string title = 1;
+
+  // url is the target URL of the remote link.
+  string url = 2;
+}
+
+// DevStatusData groups the five entity lists surfaced by Jira's Dev Status API.
+// Mirrors parse.DevStatusData.
+message DevStatusData {
+  repeated PullRequestRef pull_requests = 1;
+  repeated BranchRef branches = 2;
+  repeated CommitRef commits = 3;
+  repeated RepositoryRef repositories = 4;
+  repeated BuildRef builds = 5;
+}
+
+// PullRequestRef is a pull request associated with a Jira issue via the
+// Dev Status API. Mirrors parse.PullRequest.
+message PullRequestRef {
+  // id is the upstream pull-request identifier as reported by Jira,
+  // e.g. "#557" for GitHub. Format varies by provider.
+  string id = 1;
+
+  // url is the canonical web URL of the pull request.
+  string url = 2;
+
+  // title is the human-readable pull-request title.
+  string title = 3;
+
+  // status is the upstream lifecycle state, e.g. "OPEN", "MERGED", "DECLINED".
+  string status = 4;
+}
+
+// BranchRef is a branch associated with a Jira issue via the Dev Status API.
+// Mirrors parse.Branch.
+message BranchRef {
+  string name = 1;
+  string url = 2;
+  string repository_name = 3;
+}
+
+// CommitRef is a commit associated with a Jira issue via the Dev Status API.
+// Mirrors parse.Commit.
+message CommitRef {
+  string id = 1;
+  string message = 2;
+  string url = 3;
+  string author = 4;
+  google.protobuf.Timestamp timestamp = 5;
+}
+
+// RepositoryRef is a repository associated with a Jira issue via the Dev
+// Status API. Mirrors parse.Repository.
+message RepositoryRef {
+  string name = 1;
+  string url = 2;
+  string avatar_url = 3;
+}
+
+// BuildRef is a build associated with a Jira issue via the Dev Status API.
+// Mirrors parse.Build.
+message BuildRef {
+  string id = 1;
+  string name = 2;
+  string url = 3;
+  string state = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Reference message — mirrors extract.Reference
+// ---------------------------------------------------------------------------
+
+// Reference is a single outbound reference discovered in a Jira issue.
+// Mirrors extract.Reference.
+message Reference {
+  // kind is the classification of this reference. Matches classify.Kind.String()
+  // values: "JiraKey", "JiraURL", "GitHubPR", or "External".
+  string kind = 1;
+
+  // issue_key is the Jira issue key (e.g. "EXAMPLE-1").
+  // Populated when kind is "JiraKey" or "JiraURL".
+  string issue_key = 2;
+
+  // url is the raw URL string.
+  // Populated when kind is "JiraURL", "GitHubPR", or "External".
+  string url = 3;
+
+  // owner is the GitHub repository owner.
+  // Populated when kind is "GitHubPR".
+  string owner = 4;
+
+  // repo is the GitHub repository name.
+  // Populated when kind is "GitHubPR".
+  string repo = 5;
+
+  // pr_number is the GitHub pull request number.
+  // Populated when kind is "GitHubPR".
+  int32 pr_number = 6;
+
+  // title is the visible label for this reference, when available.
+  string title = 7;
+
+  // source identifies where in the issue this reference was discovered:
+  // "Description", "Relationship", or "RemoteLink".
+  string source = 8;
+
+  // relation carries the link direction and type for IssueLink references,
+  // e.g. "outward Blocks". Empty for all other sources.
+  string relation = 9;
+}
+
+// ---------------------------------------------------------------------------
+// Crawl RPC
+// ---------------------------------------------------------------------------
+
+// CrawlRequest specifies the parameters for a recursive crawl.
+// It mirrors a subset of the crawl knobs available via internal/config.
+message CrawlRequest {
+  // start_keys is the list of Jira issue keys to start crawling from,
+  // e.g. ["PLATENG-1147"].
+  repeated string start_keys = 1;
+
+  // depth_limit is the maximum recursion depth. 0 means unlimited.
+  int32 depth_limit = 2;
+
+  // issue_cap is the maximum number of issues to fetch. 0 means unlimited.
+  int32 issue_cap = 3;
+
+  // time_cap_seconds is the maximum wall-clock seconds for the crawl.
+  // 0 means unlimited.
+  int32 time_cap_seconds = 4;
+
+  // concurrency is the number of issues to fetch in parallel.
+  // 0 means use the server default.
+  int32 concurrency = 5;
+
+  // refetch controls whether already-fetched issues are re-downloaded.
+  bool refetch = 6;
+
+  // include_children controls whether modern Jira hierarchy children
+  // (discovered via JQL parent= search) are enqueued for crawling.
+  bool include_children = 7;
+
+  // include_dev_status controls whether Jira Dev Status API enrichment
+  // (pull requests, branches, commits, etc.) is performed per issue.
+  bool include_dev_status = 8;
+
+  // reserved for future per-request config override (T2 multi-tenancy):
+  // a future optional field carrying per-RPC Jira credentials or site
+  // overrides will be added here as an additive, non-breaking change.
+  // reserved 100 to 199;
+}
+
+// CrawlEvent is a single event streamed from the Crawl RPC.
+// It carries progress events during the crawl and a final Summary event.
+message CrawlEvent {
+  // Kind mirrors events.Kind string constants.
+  enum Kind {
+    // KIND_UNSPECIFIED is the zero value.
+    KIND_UNSPECIFIED = 0;
+
+    // KIND_ISSUE_QUEUED mirrors events.KindIssueQueued ("issue.queued").
+    KIND_ISSUE_QUEUED = 1;
+
+    // KIND_ISSUE_FETCHED mirrors events.KindIssueFetched ("issue.fetched").
+    KIND_ISSUE_FETCHED = 2;
+
+    // KIND_ISSUE_SKIPPED mirrors events.KindIssueSkipped ("issue.skipped").
+    KIND_ISSUE_SKIPPED = 3;
+
+    // KIND_ISSUE_STUBBED mirrors events.KindIssueStubbed ("issue.stubbed").
+    KIND_ISSUE_STUBBED = 4;
+
+    // KIND_ISSUE_FAILED mirrors events.KindIssueFailed ("issue.failed").
+    KIND_ISSUE_FAILED = 5;
+
+    // KIND_ISSUE_CAP_REACHED mirrors events.KindIssueCapReached ("issue.cap_reached").
+    KIND_ISSUE_CAP_REACHED = 6;
+
+    // KIND_PR_REFERENCE_FOUND mirrors events.KindPRReferenceFound ("pr_reference.found").
+    KIND_PR_REFERENCE_FOUND = 7;
+
+    // KIND_UNKNOWN_ADF_NODE mirrors events.KindUnknownADFNode ("adf.unknown_node").
+    KIND_UNKNOWN_ADF_NODE = 8;
+
+    // KIND_UNKNOWN_CUSTOM_FIELD mirrors events.KindUnknownCustomField ("custom_field.unknown").
+    KIND_UNKNOWN_CUSTOM_FIELD = 9;
+
+    // KIND_CRAWL_SUMMARY mirrors events.KindCrawlSummary ("crawl.summary").
+    // When this kind is set, the summary oneof field is populated.
+    KIND_CRAWL_SUMMARY = 10;
+
+    // KIND_CHILD_DISCOVERED mirrors events.KindChildDiscovered ("issue.child_discovered").
+    KIND_CHILD_DISCOVERED = 11;
+
+    // KIND_DEV_STATUS_PARTIAL_FAILURE mirrors events.KindDevStatusPartialFailure
+    // ("devstatus.partial_failure").
+    KIND_DEV_STATUS_PARTIAL_FAILURE = 12;
+  }
+
+  // kind identifies the category of this event.
+  Kind kind = 1;
+
+  // issue_key is the Jira issue key associated with this event.
+  // Empty when the event is not issue-specific (e.g. KIND_CRAWL_SUMMARY).
+  string issue_key = 2;
+
+  // message is a human-readable description of the event.
+  string message = 3;
+
+  // timestamp is the wall-clock time at which the event was created.
+  google.protobuf.Timestamp timestamp = 4;
+
+  // payload carries the structured payload for events that have one.
+  // Currently only KIND_CRAWL_SUMMARY populates this field.
+  oneof payload {
+    // summary is set when kind is KIND_CRAWL_SUMMARY.
+    Summary summary = 5;
+  }
+}
+
+// Summary carries the aggregate counts and key lists from a completed crawl.
+// Mirrors crawl.Summary.
+message Summary {
+  // fetched is the number of issues successfully fetched, rendered,
+  // and written to disk.
+  int32 fetched = 1;
+
+  // skipped is the number of issues that already existed on disk and
+  // were not re-fetched (refetch == false).
+  int32 skipped = 2;
+
+  // stubbed is the number of issues that could not be fetched due to
+  // a 403 or 404 response; a stub index.md was written for each.
+  int32 stubbed = 3;
+
+  // failed is the number of issues that encountered an unrecoverable
+  // per-issue error and were NOT rendered (not even as a stub).
+  int32 failed = 4;
+
+  // cap_limited is the number of issues that were discovered but not
+  // fetched because an issue cap, depth cap, or context cancellation
+  // prevented them from being enqueued or processed.
+  int32 cap_limited = 5;
+
+  // prs_found is the count of distinct GitHub PR URLs discovered
+  // across the entire crawl.
+  int32 prs_found = 6;
+
+  // fetched_keys lists the keys of successfully fetched issues,
+  // sorted alphabetically.
+  repeated string fetched_keys = 7;
+
+  // stubbed_keys lists the keys of stubbed issues, sorted alphabetically.
+  repeated string stubbed_keys = 8;
+
+  // failed_keys maps each failed issue key to a human-readable reason.
+  map<string, string> failed_keys = 9;
+
+  // cap_limited_keys lists the keys of cap-limited issues, sorted
+  // alphabetically.
+  repeated string cap_limited_keys = 10;
+
+  // duration_ms is the wall-clock time elapsed during the crawl, in
+  // milliseconds.
+  int64 duration_ms = 11;
+}

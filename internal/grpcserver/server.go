@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gojira "github.com/neumachen/gojira"
+	"github.com/neumachen/gojira/client"
 	gojirav1 "github.com/neumachen/gojira/gen/gojira/v1"
 	"github.com/neumachen/gojira/internal/extract"
 	"github.com/neumachen/gojira/internal/parse"
@@ -212,6 +213,15 @@ func toStatusError(err error) error {
 		return status.Error(codes.ResourceExhausted, err.Error())
 	case errors.Is(err, gojira.ErrConfigMissingRequired),
 		errors.Is(err, gojira.ErrConfigInvalidValue):
+		return status.Error(codes.FailedPrecondition, err.Error())
+	// Phase 2 write sentinels. A *client.APIError wraps these via
+	// Unwrap(), so errors.Is classifies correctly for both the bare
+	// sentinel and the typed write error; err.Error() carries the
+	// per-field Jira detail and flows into the status Message
+	// verbatim — no special-case extraction needed.
+	case errors.Is(err, client.ErrBadRequest):
+		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, client.ErrConflict):
 		return status.Error(codes.FailedPrecondition, err.Error())
 	default:
 		return status.Error(codes.Internal, err.Error())

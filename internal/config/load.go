@@ -55,6 +55,12 @@ type LoadOptions struct {
 	// unmodified copy back via the populated App. A nil map
 	// means "no env layer was supplied".
 	Env map[string]string
+
+	// SkipSemanticValidation skips the Layer-2 semantic validator
+	// (ValidateApp). Use this only for server-only config loading
+	// where Jira credentials are not required. Layer-1 JSON Schema
+	// validation still runs when a YAML file is present.
+	SkipSemanticValidation bool
 }
 
 // LoadApp runs the Phase 0 configuration cascade and returns a
@@ -143,8 +149,10 @@ func LoadApp(opts LoadOptions) (App, error) {
 		app.Schema = SchemaVersion
 	}
 
-	if err := ValidateApp(&app); err != nil {
-		return App{}, err
+	if !opts.SkipSemanticValidation {
+		if err := ValidateApp(&app); err != nil {
+			return App{}, err
+		}
 	}
 	return app, nil
 }

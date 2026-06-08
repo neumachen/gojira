@@ -17,6 +17,7 @@ import (
 	"github.com/neumachen/gojira/client"
 	"github.com/neumachen/gojira/internal/config"
 	"github.com/neumachen/gojira/internal/events"
+	"github.com/neumachen/gojira/internal/output"
 	"github.com/neumachen/gojira/internal/parse"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -834,7 +835,7 @@ func TestCrawl_DevStatusPartialFailure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	sum, err := CrawlWithEnrichers(ctx, cfg, []string{"EXAMPLE-1"}, ff, sink, nil, enricher)
+	sum, err := CrawlWithEnrichers(ctx, cfg, []string{"EXAMPLE-1"}, ff, sink, nil, enricher, nil)
 	require.NoError(t, err, "Crawl must not return a fatal error for a partial enrichment failure")
 
 	// Summary semantics: the issue was rendered, NOT failed.
@@ -867,4 +868,89 @@ func TestCrawl_DevStatusPartialFailure(t *testing.T) {
 	assert.Contains(t, md, "## Development", "Development section rendered from partial data")
 	assert.Contains(t, md, "https://github.com/org/repo/pull/1",
 		"the PR that did come back is rendered")
+}
+
+// ---------------------------------------------------------------------------
+// TestCrawl_InjectedStore — Phase 1 seam-4 coverage.
+// ---------------------------------------------------------------------------
+
+// recordingStore is a minimal output.Store implementation that records
+// the keys it was asked to write. It deliberately does NOT touch the
+// filesystem, so a successful run proves that the injected store, and
+// only the injected store, received the crawl output.
+type recordingStore struct {
+	mu      sync.Mutex
+	written []string
+}
+
+func (r *recordingStore) Write(_ context.Context, key, _, _ string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.written = append(r.written, key)
+	return nil
+}
+
+func (r *recordingStore) keys() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, len(r.written))
+	copy(out, r.written)
+	sort.Strings(out)
+	return out
+}
+
+// TestCrawl_InjectedStore exercises the seam-4 additive widening of
+// CrawlWithEnrichers:
+//
+//   - When a non-nil store is supplied, every successful issue write
+//     goes through it (and nothing is written to cfg.OutputDir).
+//   - When nil is supplied, the historical FSStore default kicks in
+//     and the index.md lands under cfg.OutputDir.
+func TestCrawl_InjectedStore(t *testing.T) {
+	t.Run("injected store receives writes and skips disk", func(t *testing.T) {
+		cfg := testConfig(t)
+		ff := newFakeFetcher()
+		ff.setPayload("EXAMPLE-1", minimalIssueJSON("EXAMPLE-1"))
+		sink := &events.RecordingSink{}
+		store := &recordingStore{}
+
+		ctx := context.Background()
+		sum, err := CrawlWithEnrichers(ctx, cfg, []string{"EXAMPLE-1"}, ff, sink, nil, nil, store)
+		require.NoError(t, err)
+		assert.Equal(t, 1, sum.Fetched, "Fetched")
+		assert.Equal(t, 0, sum.Failed, "Failed")
+
+		// The injected store saw the write.
+		assert.Equal(t, []string{"EXAMPLE-1"}, store.keys(), "injected store must record the issue key")
+
+		// And nothing landed on disk — the fake store does not write,
+		// so cfg.OutputDir must still be empty for this run.
+		indexPath := filepath.Join(cfg.OutputDir, "EXAMPLE-1", "index.md")
+		_, statErr := os.Stat(indexPath)
+		assert.True(t, errors.Is(statErr, os.ErrNotExist),
+			"no file must be written to cfg.OutputDir when an injected store is supplied; got err=%v", statErr)
+	})
+
+	t.Run("nil store defaults to FSStore writing to disk", func(t *testing.T) {
+		cfg := testConfig(t)
+		ff := newFakeFetcher()
+		ff.setPayload("EXAMPLE-1", minimalIssueJSON("EXAMPLE-1"))
+		sink := &events.RecordingSink{}
+
+		ctx := context.Background()
+		sum, err := CrawlWithEnrichers(ctx, cfg, []string{"EXAMPLE-1"}, ff, sink, nil, nil, nil)
+		require.NoError(t, err)
+		assert.Equal(t, 1, sum.Fetched, "Fetched")
+
+		// The historical on-disk behavior must be preserved.
+		indexPath := filepath.Join(cfg.OutputDir, "EXAMPLE-1", "index.md")
+		_, statErr := os.Stat(indexPath)
+		assert.NoError(t, statErr, "index.md must exist at %s when nil store defaults to FSStore", indexPath)
+	})
+
+	// Silence the unused-import linter in the rare case a future
+	// refactor drops the only other reference to output. The Store
+	// type assertion ensures recordingStore actually satisfies the
+	// interface that CrawlWithEnrichers expects.
+	var _ output.Store = (*recordingStore)(nil)
 }

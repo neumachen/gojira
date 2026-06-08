@@ -124,7 +124,9 @@ type Config struct {
 	Refetch bool `env:"GOJIRA_REFETCH,default=false"`
 
 	// LogLevel is the logging verbosity. One of "error", "warn", "info",
-	// "debug". Sourced from GOJIRA_LOG_LEVEL. Default: "info".
+	// "debug", "trace". Sourced from GOJIRA_LOG_LEVEL. Default: "info".
+	// "trace" is gojira's own level below slog.LevelDebug (see
+	// log.LevelTrace); it powers the crawl observability instrument.
 	LogLevel string `env:"GOJIRA_LOG_LEVEL,default=info,validate=oneof_log_level"`
 
 	// IncludeComments controls whether issue comments are fetched and
@@ -215,13 +217,16 @@ var validLogLevels = map[string]bool{
 	"warn":  true,
 	"info":  true,
 	"debug": true,
+	"trace": true,
 }
 
 // oneofLogLevel is the custom envext validator that enforces the
-// {error, warn, info, debug} constraint on GOJIRA_LOG_LEVEL. It mirrors
-// envext's built-in not_empty in falling back to the default value when
-// the env value is absent, which lets the documented default of "info"
-// satisfy the validator when GOJIRA_LOG_LEVEL is unset.
+// {error, warn, info, debug, trace} constraint on GOJIRA_LOG_LEVEL.
+// It mirrors envext's built-in not_empty in falling back to the
+// default value when the env value is absent, which lets the
+// documented default of "info" satisfy the validator when
+// GOJIRA_LOG_LEVEL is unset. "trace" is gojira's own level below
+// slog.LevelDebug; see log.LevelTrace and log.ParseLevel.
 func oneofLogLevel(info envext.FieldInfo) error {
 	v := info.EnvValue
 	if v == "" {
@@ -234,7 +239,7 @@ func oneofLogLevel(info envext.FieldInfo) error {
 		Field:  info.Name,
 		EnvKey: info.EnvKey,
 		Rule:   "oneof_log_level",
-		Err:    errext.Errorf("must be one of error/warn/info/debug, got %q", v),
+		Err:    errext.Errorf("must be one of error/warn/info/debug/trace, got %q", v),
 	}
 }
 

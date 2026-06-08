@@ -149,7 +149,7 @@ func NewValidator() *Validator {
 // only the envext path uses.
 var (
 	validLogLevelSet = map[string]struct{}{
-		"error": {}, "warn": {}, "info": {}, "debug": {},
+		"error": {}, "warn": {}, "info": {}, "debug": {}, "trace": {},
 	}
 	validLogFormatSet = map[string]struct{}{
 		"text": {}, "json": {},
@@ -225,7 +225,7 @@ func (v *Validator) Validate(a *App) error {
 	if a.Log.Level != "" {
 		if _, ok := validLogLevelSet[a.Log.Level]; !ok {
 			verrs.Add("log.level",
-				"must be one of error/warn/info/debug",
+				"must be one of error/warn/info/debug/trace",
 				a.Log.Level, ErrInvalidValue)
 		}
 	}

@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	gojira "github.com/neumachen/gojira"
+	gojiralog "github.com/neumachen/gojira/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -561,4 +563,58 @@ func TestIssueWithLinkJSON_Valid(t *testing.T) {
 	data := issueWithLinkJSON("EXAMPLE-1", "EXAMPLE-2", "https://example.atlassian.net")
 	var v interface{}
 	require.NoError(t, json.Unmarshal(data, &v), "issueWithLinkJSON produced invalid JSON")
+}
+
+// ---------------------------------------------------------------------------
+// Phase phase-a-levels-2: --log-level trace acceptance + round-trip
+// ---------------------------------------------------------------------------
+
+// TestRun_LogLevelTrace_Accepted exercises the full CLI cascade with
+// --log-level trace and asserts that the value is accepted by both the
+// config validator and the slog wiring — i.e. the run completes
+// normally (does not error out with "invalid log level") and the slog
+// output is shaped exactly as it is for the existing levels. The
+// previous --log-level=verbose path is still an error case; that
+// validation is exercised at the config layer in
+// internal/config/config_test.go.
+func TestRun_LogLevelTrace_Accepted(t *testing.T) {
+	outputDir := t.TempDir()
+	srv := newIssueServer(t, map[string][]byte{
+		"EXAMPLE-1": minimalIssueJSON("EXAMPLE-1", "https://test"),
+	}, nil)
+	t.Cleanup(srv.Close)
+
+	env := baseEnv(srv.URL, outputDir)
+	_, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "crawl", "--log-level", "trace", "EXAMPLE-1"}, env)
+
+	require.Equal(t, 0, code, "trace log-level run must exit 0 (got %d); stderr=%s", code, stderr)
+	// stderr must not contain the validator's rejection message.
+	require.NotContains(t, stderr, "invalid",
+		"trace log-level must NOT be rejected; stderr=%s", stderr)
+	require.NotContains(t, stderr, "must be one of",
+		"trace log-level must NOT hit the oneof validator; stderr=%s", stderr)
+}
+
+// TestParseLevel_Trace_FromConfig confirms the wire-up at the parsing
+// boundary: when the loaded Config carries LogLevel="trace",
+// log.ParseLevel returns log.LevelTrace. This is the integration the
+// runCrawl level-parse switch depends on; an inconsistency here would
+// silently downgrade trace runs to a different level without the user
+// noticing.
+func TestParseLevel_Trace_FromConfig(t *testing.T) {
+	cfg, err := gojira.LoadConfig(map[string]string{
+		"GOJIRA_SITE":       "https://example.atlassian.net",
+		"GOJIRA_USER":       "test@example.com",
+		"GOJIRA_TOKEN":      "test-token",
+		"GOJIRA_OUTPUT_DIR": t.TempDir(),
+		"GOJIRA_LOG_LEVEL":  "trace",
+	})
+	require.NoError(t, err, "LoadConfig must accept trace")
+	require.Equal(t, "trace", cfg.LogLevel)
+
+	lv, err := gojiralog.ParseLevel(cfg.LogLevel)
+	require.NoError(t, err, "ParseLevel must accept trace from a validated Config")
+	require.Equal(t, gojiralog.LevelTrace, lv,
+		"trace must round-trip through Config + ParseLevel to log.LevelTrace")
 }

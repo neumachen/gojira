@@ -80,8 +80,11 @@ func TestValidator_InvalidValue(t *testing.T) {
 			wantField: "jira.base_url",
 		},
 		{
+			// "trace" was added to the accepted set in the
+			// crawl-observability phase; "verbose" is now the
+			// canonical "unknown level" example.
 			name:      "log.level unknown",
-			mutate:    func(a *App) { a.Log.Level = "trace" },
+			mutate:    func(a *App) { a.Log.Level = "verbose" },
 			wantField: "log.level",
 		},
 		{
@@ -186,11 +189,14 @@ func TestValidator_NilReceiverUsesDefaults(t *testing.T) {
 
 // TestValidationErrors_AggregatesMultiple asserts that a single
 // Validate call surfaces every failing rule, not just the first.
+// Note that "trace" was added to the accepted log-level set in the
+// crawl-observability phase; this case uses "verbose" as the
+// invalid third value to keep the three-failure assertion meaningful.
 func TestValidationErrors_AggregatesMultiple(t *testing.T) {
 	a := validApp()
 	a.Jira.Email = ""
 	a.Output.Dir = ""
-	a.Log.Level = "trace"
+	a.Log.Level = "verbose"
 
 	err := ValidateApp(a)
 	require.Error(t, err)
@@ -221,12 +227,12 @@ func TestValidationError_ErrorMessage(t *testing.T) {
 
 	ve2 := &ValidationError{
 		Field:   "log.level",
-		Message: "must be one of error/warn/info/debug",
-		Value:   "trace",
+		Message: "must be one of error/warn/info/debug/trace",
+		Value:   "verbose",
 		Err:     ErrInvalidValue,
 	}
 	assert.Contains(t, ve2.Error(), "config: log.level:")
-	assert.Contains(t, ve2.Error(), "trace")
+	assert.Contains(t, ve2.Error(), "verbose")
 }
 
 // errorsAsAny is a tiny helper so the test reads naturally with the

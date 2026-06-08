@@ -69,7 +69,7 @@ crawl:
 # Logging.
 # ---------------------------------------------------------------------------
 log:
-  level: info                   # one of: error, warn, info, debug
+  level: info                   # one of: error, warn, info, debug, trace
   format: text                  # one of: text, json
 
 # ---------------------------------------------------------------------------

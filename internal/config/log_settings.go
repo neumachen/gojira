@@ -13,8 +13,10 @@ package config
 // nested-prefix stutter such as GOJIRA_LOG_LOG_LEVEL.
 type LogSettings struct {
 	// Level is the minimum log level to emit. Valid values:
-	// "error", "warn", "info", "debug". Sourced from
-	// GOJIRA_LOG_LEVEL or the "log.level" YAML key.
+	// "error", "warn", "info", "debug", "trace". Sourced from
+	// GOJIRA_LOG_LEVEL or the "log.level" YAML key. "trace" is
+	// gojira's own level below slog.LevelDebug (see log.LevelTrace);
+	// it powers the crawl observability instrument.
 	Level string `yaml:"level" json:"level" env:"GOJIRA_LOG_LEVEL"`
 
 	// Format is the log output format. Valid values: "text"

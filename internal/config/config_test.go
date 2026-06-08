@@ -149,9 +149,11 @@ func TestBuild_InvalidBool(t *testing.T) {
 }
 
 // TestBuild_InvalidLogLevel verifies that an unrecognised log level
-// returns an error wrapping ErrInvalidValue.
+// returns an error wrapping ErrInvalidValue. Note that "trace" was
+// added to the accepted set in the crawl-observability phase
+// (phase-a-levels-2); see TestBuild_ValidLogLevels below.
 func TestBuild_InvalidLogLevel(t *testing.T) {
-	cases := []string{"verbose", "WARNING", "trace", "INFO"} // wrong case or unknown
+	cases := []string{"verbose", "WARNING", "INFO"} // wrong case or unknown
 
 	for _, v := range cases {
 		t.Run("log_level_"+v, func(t *testing.T) {
@@ -212,10 +214,11 @@ func TestBuild_Defaults(t *testing.T) {
 	assert.False(t, cfg.IncludeComments, "IncludeComments default")
 }
 
-// TestBuild_ValidLogLevels verifies that all four accepted log level
-// values are accepted without error.
+// TestBuild_ValidLogLevels verifies that all five accepted log level
+// values are accepted without error. "trace" is gojira's observability
+// extension below slog.LevelDebug; see the log.LevelTrace constant.
 func TestBuild_ValidLogLevels(t *testing.T) {
-	levels := []string{"error", "warn", "info", "debug"}
+	levels := []string{"error", "warn", "info", "debug", "trace"}
 
 	for _, level := range levels {
 		t.Run("log_level_"+level, func(t *testing.T) {

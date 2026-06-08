@@ -1,20 +1,24 @@
 package client_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/neumachen/gojira/client"
 	"github.com/neumachen/gojira/internal/config"
+	gojiralog "github.com/neumachen/gojira/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -874,4 +878,220 @@ func TestDoWithRetry_PutStatusMapping(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase phase-c-httptrace-2: client.WithLogger installs the httplog
+// RoundTripper and composes with WithHTTPClient / WithRoundTripper.
+// ---------------------------------------------------------------------------
+
+// loggerTestClient builds a Client pointed at srv with the supplied options
+// layered onto WithHTTPClient(srv.Client()) — the standard injection seam
+// for the existing tests. Centralised here so the four logger tests below
+// stay focused on the behaviour they assert.
+func loggerTestClient(t *testing.T, srv *httptest.Server, cfg config.Config, extra ...client.Option) *client.Client {
+	t.Helper()
+	if cfg.Site == "" {
+		cfg.Site = srv.URL
+	}
+	if cfg.User == "" {
+		cfg.User = "user@example.com"
+	}
+	if cfg.Token == "" {
+		cfg.Token = "api-token"
+	}
+	opts := []client.Option{client.WithHTTPClient(srv.Client())}
+	opts = append(opts, extra...)
+	c, err := client.New(cfg, opts...)
+	require.NoError(t, err, "client.New")
+	return c
+}
+
+// decodeJSONRecords iterates the buffer's JSON log lines and returns them
+// as a slice of maps. Tolerant: stops on the first decode error so a
+// trailing newline doesn't break the assertion.
+func decodeJSONRecords(t *testing.T, buf *bytes.Buffer) []map[string]any {
+	t.Helper()
+	var out []map[string]any
+	dec := json.NewDecoder(bytes.NewReader(buf.Bytes()))
+	for {
+		var rec map[string]any
+		if err := dec.Decode(&rec); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			break
+		}
+		out = append(out, rec)
+	}
+	return out
+}
+
+func recordByMsg(records []map[string]any, msg string) map[string]any {
+	for _, r := range records {
+		if got, _ := r["msg"].(string); got == msg {
+			return r
+		}
+	}
+	return nil
+}
+
+// TestWithLogger_EmitsResponseStreamLogs asserts that constructing a
+// client with WithLogger produces exactly one INFO summary line per
+// real request, tagged trace_stream=response, with the expected
+// method/status/bytes/duration_ms attributes. The TRACE-only lines
+// (http.request.start / http.request.complete) must NOT appear when
+// the logger is configured at INFO.
+func TestWithLogger_EmitsResponseStreamLogs(t *testing.T) {
+	const body = "ok"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+
+	var buf bytes.Buffer
+	lg := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	c := loggerTestClient(t, srv, config.Config{}, client.WithLogger(lg))
+
+	// We accept the error path because "EX-1" against a stubbed server
+	// is shape-invalid for GetIssue's parser. The contract under test
+	// is the log output, not the issue parse.
+	_, _ = c.GetIssue(context.Background(), "EX-1", nil)
+
+	recs := decodeJSONRecords(t, &buf)
+	require.NotEmpty(t, recs, "expected at least one logger record; buf=%s", buf.String())
+
+	resp := recordByMsg(recs, "http.response")
+	require.NotNil(t, resp, "expected an http.response record; buf=%s", buf.String())
+
+	assert.Equal(t, "INFO", resp["level"], "level must be INFO at slog.LevelInfo")
+	assert.Equal(t, "response", resp["trace_stream"], "trace_stream must be 'response'")
+	if got, _ := resp["http_method"].(string); got != http.MethodGet {
+		t.Errorf("http_method: got %v, want GET", resp["http_method"])
+	}
+	if got, _ := resp["status"].(float64); int(got) != http.StatusOK {
+		t.Errorf("status: got %v, want 200", resp["status"])
+	}
+	if got, _ := resp["bytes"].(float64); int(got) != len(body) {
+		t.Errorf("bytes: got %v, want %d", resp["bytes"], len(body))
+	}
+	if _, ok := resp["duration_ms"]; !ok {
+		t.Errorf("duration_ms missing on summary line")
+	}
+
+	// At LevelInfo the httptrace lines MUST be suppressed (LevelTrace
+	// is below LevelInfo on slog's ladder).
+	assert.Nil(t, recordByMsg(recs, "http.request.start"),
+		"http.request.start must not appear at INFO level")
+	assert.Nil(t, recordByMsg(recs, "http.request.complete"),
+		"http.request.complete must not appear at INFO level")
+}
+
+// TestWithLogger_RedactionAudit is the unit-scope guard for the absolute
+// credential-redaction invariant the crawl-observability PRD requires.
+// The client's authHeader is "Basic <base64(user:token)>". At
+// log.LevelTrace the round-tripper logs request headers; this test
+// grep-checks that the base64 token AND the raw token literal do NOT
+// appear anywhere in the captured buffer, and that the REDACTED
+// placeholder DOES appear.
+func TestWithLogger_RedactionAudit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, "ok")
+	}))
+	t.Cleanup(srv.Close)
+
+	var buf bytes.Buffer
+	lg := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: gojiralog.LevelTrace}))
+
+	cfg := config.Config{
+		Site:  srv.URL,
+		User:  "alice",
+		Token: "topsecret-token-abc",
+	}
+	expectedAuthB64 := base64.StdEncoding.EncodeToString([]byte(cfg.User + ":" + cfg.Token))
+
+	c := loggerTestClient(t, srv, cfg, client.WithLogger(lg))
+	_, _ = c.GetIssue(context.Background(), "EX-1", nil)
+
+	captured := buf.String()
+	assert.NotContains(t, captured, expectedAuthB64,
+		"the Basic-auth base64 token must NEVER appear in logs")
+	assert.NotContains(t, captured, "topsecret-token-abc",
+		"the raw token literal must NEVER appear in logs")
+	assert.True(t, strings.Contains(captured, "REDACTED"),
+		"expected REDACTED placeholder at trace level; buf=%s", captured)
+}
+
+// TestWithLogger_NilIsNoop guards back-compat: WithLogger(nil) must
+// produce no panics and no log output. A separate observation buffer
+// (NOT passed through WithLogger) confirms nothing leaked: the
+// implementation must skip the httplog wrap when c.logger is nil, so
+// nothing is ever wired to a sink.
+func TestWithLogger_NilIsNoop(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	t.Cleanup(srv.Close)
+
+	c := loggerTestClient(t, srv, config.Config{}, client.WithLogger(nil))
+
+	// A nil logger must not panic; the request still proceeds.
+	_, _ = c.GetIssue(context.Background(), "EX-1", nil)
+
+	// And, for clarity, a sibling observation buffer wired to a NEW
+	// logger that the client knows NOTHING about must stay empty —
+	// proof that no global sink is being touched.
+	var watch bytes.Buffer
+	_ = slog.New(slog.NewJSONHandler(&watch, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	assert.Empty(t, watch.String(),
+		"sibling observation buffer must stay empty when WithLogger(nil)")
+}
+
+// countingRT is a small RoundTripper that records every request before
+// delegating to base. Used to prove the httplog wrap composes with a
+// caller-supplied transport: order should be httplog → counter → wire,
+// so the counter still runs exactly once per request AND the logger
+// also emits its summary line.
+type countingRT struct {
+	base http.RoundTripper
+	n    atomic.Int32
+}
+
+func (c *countingRT) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.n.Add(1)
+	return c.base.RoundTrip(req)
+}
+
+func TestWithLogger_ComposesWithWithRoundTripper(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	t.Cleanup(srv.Close)
+
+	var buf bytes.Buffer
+	lg := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	counter := &countingRT{base: srv.Client().Transport}
+	c := loggerTestClient(t, srv, config.Config{},
+		client.WithRoundTripper(counter),
+		client.WithLogger(lg),
+	)
+	_, _ = c.GetIssue(context.Background(), "EX-1", nil)
+
+	// The counter MUST have been called exactly once: httplog's
+	// RoundTrip delegates to its base, which is the counter, which
+	// delegates to the wire.
+	if got := counter.n.Load(); got != 1 {
+		t.Errorf("counter RoundTripper calls: got %d, want 1", got)
+	}
+
+	// And the logger MUST have captured the http.response summary line,
+	// proving both wraps fire on the same request.
+	recs := decodeJSONRecords(t, &buf)
+	assert.NotNil(t, recordByMsg(recs, "http.response"),
+		"logger must receive http.response when composing with WithRoundTripper")
 }

@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"math"
 	"net"
 	"net/http"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/neumachen/errext"
 	"github.com/neumachen/gojira/internal/config"
+	"github.com/neumachen/gojira/internal/httplog"
 )
 
 // Sentinel errors that callers can match with errors.Is.
@@ -77,6 +79,12 @@ type Client struct {
 	siteURL    *url.URL
 	authHeader string // pre-computed "Basic <base64(user:token)>"
 
+	// logger, when non-nil, drives the logging RoundTripper installed
+	// in New for crawl observability. Nil means no HTTP request logging
+	// is emitted — bytes-identical behavior to clients constructed
+	// before WithLogger existed.
+	logger *slog.Logger
+
 	maxRateLimitRetries  int
 	maxNetworkRetries    int
 	rateLimitBaseBackoff time.Duration
@@ -105,6 +113,23 @@ func WithRoundTripper(rt http.RoundTripper) Option {
 	return func(c *Client) {
 		c.httpClient.Transport = rt
 	}
+}
+
+// WithLogger installs a logging RoundTripper that emits one INFO summary
+// per request (method/url/status/duration_ms/bytes) and, when the logger
+// is enabled at [log.LevelTrace], a full [net/http/httptrace] lifecycle
+// plus the raw response body. Authorization and other sensitive headers
+// are always redacted. A nil logger is a no-op: no request logging is
+// emitted and the transport is left untouched, so existing callers see
+// byte-identical behavior.
+//
+// WithLogger composes with [WithHTTPClient] and [WithRoundTripper]: the
+// logging RoundTripper is installed by [New] AFTER all options have
+// been applied, so it wraps whatever Transport ended up on the client.
+// Order between WithLogger and WithRoundTripper / WithHTTPClient is
+// irrelevant.
+func WithLogger(lg *slog.Logger) Option {
+	return func(c *Client) { c.logger = lg }
 }
 
 // WithMaxRetries sets the maximum number of 429 retry attempts.
@@ -169,6 +194,23 @@ func New(cfg config.Config, opts ...Option) (*Client, error) {
 
 	for _, opt := range opts {
 		opt(c)
+	}
+
+	// Install the logging RoundTripper last so it wraps any
+	// caller-supplied Transport from WithRoundTripper or
+	// WithHTTPClient. The default http.Client constructed above has
+	// Transport == nil, which net/http treats as http.DefaultTransport;
+	// we resolve it explicitly here so the wrapped chain has a real
+	// base. When no logger is supplied this branch is skipped and the
+	// transport is left exactly as the options configured it, keeping
+	// behavior bytes-identical for callers that have not opted into
+	// observability.
+	if c.logger != nil {
+		base := c.httpClient.Transport
+		if base == nil {
+			base = http.DefaultTransport
+		}
+		c.httpClient.Transport = httplog.New(base, c.logger)
 	}
 
 	return c, nil

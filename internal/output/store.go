@@ -22,3 +22,25 @@ import "context"
 type Store interface {
 	Write(ctx context.Context, key, indexMD, outboundMD string) error
 }
+
+// FSStore is a Store implementation that writes Jira issue Markdown to
+// the local filesystem. It delegates to [Write], preserving atomic write
+// semantics and skip-if-exists behaviour.
+type FSStore struct {
+	OutputDir string
+	Refetch   bool
+}
+
+// NewFSStore returns an FSStore rooted at outputDir. When refetch is
+// false, Write returns [ErrAlreadyExists] if the issue's index.md
+// already exists.
+func NewFSStore(outputDir string, refetch bool) *FSStore {
+	return &FSStore{OutputDir: outputDir, Refetch: refetch}
+}
+
+// Write persists the rendered Markdown for key by delegating to the
+// package-level [Write] function. It returns [ErrAlreadyExists] when
+// the index already exists and Refetch is false.
+func (s *FSStore) Write(_ context.Context, key, indexMD, outboundMD string) error {
+	return Write(s.OutputDir, key, indexMD, outboundMD, s.Refetch)
+}

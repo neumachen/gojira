@@ -3,6 +3,8 @@ package output_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/neumachen/gojira/internal/output"
@@ -84,4 +86,112 @@ func TestStoreInterfaceShape(t *testing.T) {
 			t.Errorf("outboundMD: got %q, want empty string", got.outboundMD)
 		}
 	})
+}
+
+// TestFSStore verifies FSStore, the filesystem-backed Store implementation.
+func TestFSStore(t *testing.T) {
+	// Compile-time assertion: FSStore must implement output.Store.
+	var _ output.Store = (*output.FSStore)(nil)
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name       string
+		key        string
+		indexMD    string
+		outboundMD string
+		refetch    bool
+		seedFirst  bool // write once with refetch=false before the test Write
+		wantErr    error
+	}{
+		{
+			name:       "writes index and outbound",
+			key:        "PLATENG-10",
+			indexMD:    "# PLATENG-10",
+			outboundMD: "## outbound",
+			refetch:    false,
+			seedFirst:  false,
+			wantErr:    nil,
+		},
+		{
+			name:       "writes index only when outboundMD empty",
+			key:        "PLATENG-11",
+			indexMD:    "# PLATENG-11",
+			outboundMD: "",
+			refetch:    false,
+			seedFirst:  false,
+			wantErr:    nil,
+		},
+		{
+			name:       "returns ErrAlreadyExists when index exists and refetch false",
+			key:        "PLATENG-12",
+			indexMD:    "# PLATENG-12 new",
+			outboundMD: "",
+			refetch:    false,
+			seedFirst:  true,
+			wantErr:    output.ErrAlreadyExists,
+		},
+		{
+			name:       "refetch=true overwrites existing files",
+			key:        "PLATENG-13",
+			indexMD:    "# PLATENG-13 updated",
+			outboundMD: "## updated outbound",
+			refetch:    true,
+			seedFirst:  true,
+			wantErr:    nil,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			if tc.seedFirst {
+				seed := output.NewFSStore(dir, false)
+				if err := seed.Write(ctx, tc.key, "# original", "## original outbound"); err != nil {
+					t.Fatalf("seed Write failed: %v", err)
+				}
+			}
+
+			s := output.NewFSStore(dir, tc.refetch)
+			err := s.Write(ctx, tc.key, tc.indexMD, tc.outboundMD)
+
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("Write error: got %v, want %v", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected Write error: %v", err)
+			}
+
+			// Verify index.md on disk.
+			indexPath := filepath.Join(dir, tc.key, "index.md")
+			gotIndex, err := os.ReadFile(indexPath)
+			if err != nil {
+				t.Fatalf("read index.md: %v", err)
+			}
+			if string(gotIndex) != tc.indexMD {
+				t.Errorf("index.md: got %q, want %q", string(gotIndex), tc.indexMD)
+			}
+
+			// Verify references/outbound.md on disk.
+			outboundPath := filepath.Join(dir, tc.key, "references", "outbound.md")
+			if tc.outboundMD != "" {
+				gotOutbound, err := os.ReadFile(outboundPath)
+				if err != nil {
+					t.Fatalf("read references/outbound.md: %v", err)
+				}
+				if string(gotOutbound) != tc.outboundMD {
+					t.Errorf("references/outbound.md: got %q, want %q", string(gotOutbound), tc.outboundMD)
+				}
+			} else {
+				if _, err := os.Stat(outboundPath); err == nil {
+					t.Error("references/outbound.md should not exist when outboundMD is empty")
+				}
+			}
+		})
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -37,6 +38,22 @@ type Server struct {
 	// crawlFn runs a recursive crawl. Defaults to a closure over
 	// gojira.Crawl. Overridable in tests.
 	crawlFn func(ctx context.Context, cfg gojira.Config, startKeys []string, sink gojira.Sink) (gojira.Summary, error)
+
+	// Phase-2 write seams. Each defaults in [NewServer] to a closure
+	// over the matching gojira facade function and is overridable via
+	// the With*Func [Option] constructors below. Keeping them on the
+	// Server (rather than embedding a separate "writes" sub-struct)
+	// matches the read-side getIssueFn/crawlFn pattern and keeps the
+	// test wiring (NewServer(cfg, WithXxxFunc(fake))) uniform.
+	createIssueFn func(ctx context.Context, cfg gojira.Config, project, issueType string, opts ...client.CreateOption) (client.CreatedIssue, error)
+	updateIssueFn func(ctx context.Context, cfg gojira.Config, key string, opts ...client.UpdateOption) error
+	addCommentFn  func(ctx context.Context, cfg gojira.Config, key string, opts ...client.CommentOption) (client.Comment, error)
+
+	// listTransitionsFn backs the ListTransitions handler AND the
+	// by-name resolution path of TransitionIssue. Keeping a single
+	// seam lets a test cover both paths with one fake.
+	listTransitionsFn func(ctx context.Context, cfg gojira.Config, key string) ([]client.Transition, error)
+	transitionIssueFn func(ctx context.Context, cfg gojira.Config, key, transitionID string, opts ...client.TransitionOption) error
 }
 
 // Option mutates a Server during construction. Options are applied
@@ -63,6 +80,40 @@ func WithCrawlFunc(fn func(ctx context.Context, cfg gojira.Config, startKeys []s
 	return func(s *Server) { s.crawlFn = fn }
 }
 
+// WithCreateIssueFunc overrides the function used by [Server.CreateIssue].
+// The default closes over [gojira.CreateIssue]; tests inject a fake to
+// avoid touching Jira.
+func WithCreateIssueFunc(fn func(ctx context.Context, cfg gojira.Config, project, issueType string, opts ...client.CreateOption) (client.CreatedIssue, error)) Option {
+	return func(s *Server) { s.createIssueFn = fn }
+}
+
+// WithUpdateIssueFunc overrides the function used by [Server.UpdateIssue].
+// The default closes over [gojira.UpdateIssue].
+func WithUpdateIssueFunc(fn func(ctx context.Context, cfg gojira.Config, key string, opts ...client.UpdateOption) error) Option {
+	return func(s *Server) { s.updateIssueFn = fn }
+}
+
+// WithAddCommentFunc overrides the function used by [Server.AddComment].
+// The default closes over [gojira.AddComment].
+func WithAddCommentFunc(fn func(ctx context.Context, cfg gojira.Config, key string, opts ...client.CommentOption) (client.Comment, error)) Option {
+	return func(s *Server) { s.addCommentFn = fn }
+}
+
+// WithListTransitionsFunc overrides the function used by
+// [Server.ListTransitions]. The default closes over
+// [gojira.ListTransitions].
+func WithListTransitionsFunc(fn func(ctx context.Context, cfg gojira.Config, key string) ([]client.Transition, error)) Option {
+	return func(s *Server) { s.listTransitionsFn = fn }
+}
+
+// WithTransitionIssueFunc overrides the function used by the id-based
+// path of [Server.TransitionIssue]. The default closes over
+// [gojira.TransitionIssue]. The by-name path additionally uses
+// [WithListTransitionsFunc] to resolve a target status to an id.
+func WithTransitionIssueFunc(fn func(ctx context.Context, cfg gojira.Config, key, transitionID string, opts ...client.TransitionOption) error) Option {
+	return func(s *Server) { s.transitionIssueFn = fn }
+}
+
 // NewServer constructs a Server with the given runtime configuration and
 // the production gojira facade wired into the injectable seams. Each
 // supplied [Option] is applied after the defaults, allowing tests to
@@ -75,6 +126,21 @@ func NewServer(cfg gojira.Config, opts ...Option) *Server {
 		},
 		crawlFn: func(ctx context.Context, cfg gojira.Config, startKeys []string, sink gojira.Sink) (gojira.Summary, error) {
 			return gojira.Crawl(ctx, cfg, startKeys, sink)
+		},
+		createIssueFn: func(ctx context.Context, cfg gojira.Config, project, issueType string, opts ...client.CreateOption) (client.CreatedIssue, error) {
+			return gojira.CreateIssue(ctx, cfg, project, issueType, opts...)
+		},
+		updateIssueFn: func(ctx context.Context, cfg gojira.Config, key string, opts ...client.UpdateOption) error {
+			return gojira.UpdateIssue(ctx, cfg, key, opts...)
+		},
+		addCommentFn: func(ctx context.Context, cfg gojira.Config, key string, opts ...client.CommentOption) (client.Comment, error) {
+			return gojira.AddComment(ctx, cfg, key, opts...)
+		},
+		listTransitionsFn: func(ctx context.Context, cfg gojira.Config, key string) ([]client.Transition, error) {
+			return gojira.ListTransitions(ctx, cfg, key)
+		},
+		transitionIssueFn: func(ctx context.Context, cfg gojira.Config, key, transitionID string, opts ...client.TransitionOption) error {
+			return gojira.TransitionIssue(ctx, cfg, key, transitionID, opts...)
 		},
 	}
 	for _, opt := range opts {
@@ -346,4 +412,240 @@ func referenceToProto(r extract.Reference) *gojirav1.Reference {
 		Source:   r.Source.String(),
 		Relation: r.Relation,
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: Jira write-operation handlers
+// ---------------------------------------------------------------------------
+//
+// Each handler stays a thin shim: validate the request, build client
+// options from the proto fields, run either the dry-run body builder or
+// the injectable seam, and map the result (or error) onto the proto
+// response. Sentinel → gRPC code mapping flows through [toStatusError]
+// (extended in phase-f-server-3 to know about ErrBadRequest/ErrConflict
+// plus the *client.APIError they wrap).
+
+// rawFieldToValue decodes a single raw_fields entry. The wire shape is
+// map<string,string> where each value is a raw JSON literal — that's
+// how the gRPC layer keeps the proto contract simple while still
+// supporting arbitrary Jira custom-field shapes (numbers, objects,
+// arrays). Decoding it into an `any` lets the [client.WithField] /
+// [client.WithFieldUpdate] options produce the correct JSON wire form.
+// When a value is not valid JSON we fall back to the raw string — a
+// common case where the caller forgot to quote a string literal.
+func rawFieldToValue(raw string) any {
+	if raw == "" {
+		return ""
+	}
+	var v any
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return raw
+	}
+	return v
+}
+
+// rawFieldsToCreateOpts turns the proto raw_fields map into a slice of
+// CreateOption entries via WithField. Order within a single proto map
+// is undefined, but the resulting fields object treats every entry
+// independently, so the order is irrelevant for correctness.
+func rawFieldsToCreateOpts(m map[string]string) []client.CreateOption {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]client.CreateOption, 0, len(m))
+	for k, v := range m {
+		out = append(out, client.WithField(k, rawFieldToValue(v)))
+	}
+	return out
+}
+
+// rawFieldsToUpdateOpts is the Update-side counterpart to
+// rawFieldsToCreateOpts.
+func rawFieldsToUpdateOpts(m map[string]string) []client.UpdateOption {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]client.UpdateOption, 0, len(m))
+	for k, v := range m {
+		out = append(out, client.WithFieldUpdate(k, rawFieldToValue(v)))
+	}
+	return out
+}
+
+// CreateIssue creates a new Jira issue. When dry_run is set, the
+// returned response carries dry_run_body (the JSON body the server
+// would have POSTed) and the createIssueFn seam is not invoked, so
+// callers can preview a write before mutating.
+func (s *Server) CreateIssue(ctx context.Context, req *gojirav1.CreateIssueRequest) (*gojirav1.CreateIssueResponse, error) {
+	project := req.GetProject()
+	if project == "" {
+		return nil, status.Error(codes.InvalidArgument, "project is required")
+	}
+	issueType := req.GetIssueType()
+	if issueType == "" {
+		return nil, status.Error(codes.InvalidArgument, "issue_type is required")
+	}
+
+	opts := make([]client.CreateOption, 0, 6)
+	if v := req.GetSummary(); v != "" {
+		opts = append(opts, client.WithSummary(v))
+	}
+	if v := req.GetDescription(); v != "" {
+		opts = append(opts, client.WithDescriptionText(v))
+	}
+	if v := req.GetLabels(); len(v) > 0 {
+		opts = append(opts, client.WithLabels(v...))
+	}
+	if v := req.GetParentKey(); v != "" {
+		opts = append(opts, client.WithParent(v))
+	}
+	opts = append(opts, rawFieldsToCreateOpts(req.GetRawFields())...)
+
+	if req.GetDryRun() {
+		body, err := gojira.BuildCreateIssueBody(project, issueType, opts...)
+		if err != nil {
+			return nil, toStatusError(err)
+		}
+		return &gojirav1.CreateIssueResponse{DryRunBody: body}, nil
+	}
+
+	res, err := s.createIssueFn(ctx, s.cfg, project, issueType, opts...)
+	if err != nil {
+		return nil, toStatusError(err)
+	}
+	return &gojirav1.CreateIssueResponse{
+		Key:  res.Key,
+		Id:   res.ID,
+		Self: res.Self,
+	}, nil
+}
+
+// UpdateIssue edits fields on an existing Jira issue. dry_run mirrors
+// the [CreateIssue] semantics: when set, the seam is NOT invoked and
+// the response carries dry_run_body with Ok=false (no change made).
+func (s *Server) UpdateIssue(ctx context.Context, req *gojirav1.UpdateIssueRequest) (*gojirav1.UpdateIssueResponse, error) {
+	key := req.GetKey()
+	if key == "" {
+		return nil, status.Error(codes.InvalidArgument, "key is required")
+	}
+
+	opts := make([]client.UpdateOption, 0, 4)
+	if v := req.GetSummary(); v != "" {
+		opts = append(opts, client.WithSummaryUpdate(v))
+	}
+	if v := req.GetDescription(); v != "" {
+		opts = append(opts, client.WithDescriptionTextUpdate(v))
+	}
+	opts = append(opts, rawFieldsToUpdateOpts(req.GetRawFields())...)
+
+	if req.GetDryRun() {
+		body, err := gojira.BuildUpdateIssueBody(opts...)
+		if err != nil {
+			return nil, toStatusError(err)
+		}
+		return &gojirav1.UpdateIssueResponse{Ok: false, DryRunBody: body}, nil
+	}
+
+	if err := s.updateIssueFn(ctx, s.cfg, key, opts...); err != nil {
+		return nil, toStatusError(err)
+	}
+	return &gojirav1.UpdateIssueResponse{Ok: true}, nil
+}
+
+// AddComment appends a plain-text comment to an issue. The text is
+// converted to ADF inside the client via [client.WithCommentText].
+func (s *Server) AddComment(ctx context.Context, req *gojirav1.AddCommentRequest) (*gojirav1.AddCommentResponse, error) {
+	key := req.GetKey()
+	if key == "" {
+		return nil, status.Error(codes.InvalidArgument, "key is required")
+	}
+
+	c, err := s.addCommentFn(ctx, s.cfg, key, client.WithCommentText(req.GetBodyText()))
+	if err != nil {
+		return nil, toStatusError(err)
+	}
+	return &gojirav1.AddCommentResponse{
+		Id:                c.ID,
+		AuthorDisplayName: c.AuthorDisplayName,
+		Created:           c.Created,
+	}, nil
+}
+
+// ListTransitions lists the workflow transitions currently available
+// for the given issue.
+func (s *Server) ListTransitions(ctx context.Context, req *gojirav1.ListTransitionsRequest) (*gojirav1.ListTransitionsResponse, error) {
+	key := req.GetKey()
+	if key == "" {
+		return nil, status.Error(codes.InvalidArgument, "key is required")
+	}
+
+	ts, err := s.listTransitionsFn(ctx, s.cfg, key)
+	if err != nil {
+		return nil, toStatusError(err)
+	}
+	out := make([]*gojirav1.Transition, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, &gojirav1.Transition{
+			Id:       t.ID,
+			Name:     t.Name,
+			ToStatus: t.ToStatus,
+		})
+	}
+	return &gojirav1.ListTransitionsResponse{Transitions: out}, nil
+}
+
+// TransitionIssue moves an issue through a workflow transition,
+// selected either by transition_id (direct) or by target_status_name
+// (resolved in this handler via the same listTransitionsFn seam used
+// by [Server.ListTransitions], so a single fake covers both paths).
+//
+// Resolution rules: case-insensitive ToStatus match; zero matches is
+// codes.NotFound, more than one match is codes.FailedPrecondition
+// (gojira refuses to silently pick one). The optional comment_text is
+// passed through as [client.WithTransitionCommentText].
+func (s *Server) TransitionIssue(ctx context.Context, req *gojirav1.TransitionIssueRequest) (*gojirav1.TransitionIssueResponse, error) {
+	key := req.GetKey()
+	if key == "" {
+		return nil, status.Error(codes.InvalidArgument, "key is required")
+	}
+
+	transitionID := req.GetTransitionId()
+	if transitionID == "" {
+		name := req.GetTargetStatusName()
+		if name == "" {
+			return nil, status.Error(codes.InvalidArgument,
+				"transition_id or target_status_name is required")
+		}
+		ts, err := s.listTransitionsFn(ctx, s.cfg, key)
+		if err != nil {
+			return nil, toStatusError(err)
+		}
+		matches := make([]client.Transition, 0, 1)
+		for _, t := range ts {
+			if strings.EqualFold(t.ToStatus, name) {
+				matches = append(matches, t)
+			}
+		}
+		switch len(matches) {
+		case 0:
+			return nil, status.Errorf(codes.NotFound,
+				"no transition to status %q for %s", name, key)
+		case 1:
+			transitionID = matches[0].ID
+		default:
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"ambiguous transition to status %q for %s (%d matches)",
+				name, key, len(matches))
+		}
+	}
+
+	opts := make([]client.TransitionOption, 0, 1)
+	if v := req.GetCommentText(); v != "" {
+		opts = append(opts, client.WithTransitionCommentText(v))
+	}
+
+	if err := s.transitionIssueFn(ctx, s.cfg, key, transitionID, opts...); err != nil {
+		return nil, toStatusError(err)
+	}
+	return &gojirav1.TransitionIssueResponse{Ok: true}, nil
 }

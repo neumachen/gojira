@@ -170,6 +170,10 @@ type crawler struct {
 	cfg     config.Config
 	fetcher fetch.Fetcher
 	sink    events.Sink
+	// store is the injectable output destination. It is always non-nil
+	// after construction; CrawlWithEnrichers defaults to an FSStore
+	// rooted at cfg.OutputDir when the caller passes nil.
+	store output.Store
 	// hier discovers hierarchy children for an already-fetched issue.
 	// nil when hierarchy discovery is disabled (cfg.IncludeChildren is
 	// false) or when the caller chose to construct the crawler via the
@@ -497,8 +501,8 @@ func (c *crawler) processIssue(item workItem) error {
 		return nil
 	}
 
-	// Write to disk.
-	writeErr := output.Write(c.cfg.OutputDir, key, indexMD, outboundMD, c.cfg.Refetch)
+	// Write to disk via the injected Store.
+	writeErr := c.store.Write(c.crawlCtx, key, indexMD, outboundMD)
 	if writeErr != nil {
 		if errors.Is(writeErr, output.ErrAlreadyExists) {
 			// Race: another goroutine wrote this key between our probe
@@ -692,8 +696,8 @@ func (c *crawler) writeStub(key, reason string) {
 		return
 	}
 
-	// Write stub; always refetch=true so we overwrite any prior stub.
-	writeErr := output.Write(c.cfg.OutputDir, key, stubMD, "", true)
+	// Write stub via the injected Store.
+	writeErr := c.store.Write(c.crawlCtx, key, stubMD, "")
 	if writeErr != nil {
 		r := fmt.Sprintf("write stub error: %v", writeErr)
 		c.sink.Emit(events.Event{
@@ -859,6 +863,7 @@ func CrawlWithEnrichers(
 		cfg:         cfg,
 		fetcher:     fetcher,
 		sink:        sink,
+		store:       output.NewFSStore(cfg.OutputDir, cfg.Refetch),
 		hier:        hier,
 		devStatus:   devStatus,
 		crawlCtx:    crawlCtx,

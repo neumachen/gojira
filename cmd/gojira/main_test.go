@@ -8,6 +8,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -617,4 +618,122 @@ func TestParseLevel_Trace_FromConfig(t *testing.T) {
 	require.NoError(t, err, "ParseLevel must accept trace from a validated Config")
 	require.Equal(t, gojiralog.LevelTrace, lv,
 		"trace must round-trip through Config + ParseLevel to log.LevelTrace")
+}
+
+// ---------------------------------------------------------------------------
+// Phase phase-e-wire-2 + phase-g-verify-2: end-to-end CLI correlation +
+// credential-redaction audit at the binary boundary
+// ---------------------------------------------------------------------------
+
+// TestRun_LogLevelTrace_EmitsCorrelatedTraces drives the full CLI cascade
+// with --log-level trace --log-format json and verifies three guarantees of
+// the observability instrument at the binary boundary:
+//
+//  1. Both trace streams are emitted: the HTTP client layer emits records
+//     with trace_stream="response" (via the httplog round-tripper installed
+//     by client.WithLogger), and the crawl orchestrator emits records with
+//     trace_stream="stream" (per-issue / per-phase spans).
+//  2. The two streams share the same run_id, proving end-to-end correlation
+//     from the CLI flag through gojira.CrawlWithLogger down to both the
+//     fetch and orchestration layers.
+//  3. The end-of-run crawl.measurement INFO summary is emitted.
+//
+// The test also performs the binary-level credential-redaction audit
+// required by AGENTS.md: even at trace level, the Authorization header
+// value (base64 of "alice:secret-token-xyz") and the raw token must NEVER
+// appear in stderr, and the "REDACTED" placeholder must appear at least
+// once where the Authorization header would otherwise have been logged.
+func TestRun_LogLevelTrace_EmitsCorrelatedTraces(t *testing.T) {
+	outputDir := t.TempDir()
+
+	// httptest server: returns a minimal valid Jira issue JSON for any
+	// GET under /rest/api/3/issue/. The fixture is intentionally tiny —
+	// the test asserts on log records, not on parsed Jira content.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"key":"EX-1","self":"` + r.Host + `/rest/api/3/issue/EX-1","fields":{"summary":"S","status":{"name":"Open"},"issuetype":{"name":"Task"},"assignee":null,"reporter":{"displayName":"A","emailAddress":"a@e.com"},"created":"2026-01-01T00:00:00.000+0000","updated":"2026-01-01T00:00:00.000+0000","description":null,"parent":null,"subtasks":[],"issuelinks":[],"remotelinks":[]}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	// Deliberate fixture credentials. "alice" + "secret-token-xyz" appear
+	// nowhere else in the codebase, so any leak is unambiguous.
+	env := map[string]string{
+		"GOJIRA_SITE":        srv.URL,
+		"GOJIRA_USER":        "alice",
+		"GOJIRA_TOKEN":       "secret-token-xyz",
+		"GOJIRA_OUTPUT_DIR":  outputDir,
+		"GOJIRA_CONCURRENCY": "1",
+		"GOJIRA_ISSUE_CAP":   "0",
+	}
+
+	_, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "crawl", "--log-level", "trace", "--log-format", "json", "EX-1"}, env)
+	require.Equal(t, 0, code, "trace+json run must exit 0; stderr:\n%s", stderr)
+
+	// Decode every JSON-shaped line on stderr. Non-JSON noise (the
+	// plain-text summary block, the "=== gojira crawl summary ===" banner,
+	// etc.) is skipped.
+	var records []map[string]interface{}
+	for _, line := range strings.Split(stderr, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "{") {
+			continue
+		}
+		var rec map[string]interface{}
+		if err := json.Unmarshal([]byte(trimmed), &rec); err != nil {
+			// Tolerate the rare not-actually-JSON line that
+			// happens to start with '{'; the assertions below
+			// will catch genuine missing records.
+			continue
+		}
+		records = append(records, rec)
+	}
+	require.NotEmpty(t, records, "expected JSON-shaped slog records on stderr:\n%s", stderr)
+
+	// Find one record per required (msg, trace_stream) combination and
+	// capture its run_id. The first match wins; subsequent occurrences
+	// (there will be many) are not needed for correlation.
+	var (
+		runIDResponse  string
+		runIDStream    string
+		sawMeasurement bool
+	)
+	for _, rec := range records {
+		msg, _ := rec["msg"].(string)
+		stream, _ := rec["trace_stream"].(string)
+		switch {
+		case msg == "http.response" && stream == "response" && runIDResponse == "":
+			runIDResponse, _ = rec["run_id"].(string)
+		case msg == "issue.process.start" && stream == "stream" && runIDStream == "":
+			runIDStream, _ = rec["run_id"].(string)
+		case msg == "crawl.measurement":
+			sawMeasurement = true
+		}
+	}
+
+	require.NotEmpty(t, runIDResponse,
+		"expected an http.response record with trace_stream=\"response\" and a non-empty run_id; records=%d, stderr:\n%s",
+		len(records), stderr)
+	require.NotEmpty(t, runIDStream,
+		"expected an issue.process.start record with trace_stream=\"stream\" and a non-empty run_id; records=%d, stderr:\n%s",
+		len(records), stderr)
+	assert.True(t, sawMeasurement,
+		"expected a crawl.measurement INFO record at end of run; stderr:\n%s", stderr)
+	assert.Equal(t, runIDResponse, runIDStream,
+		"response-stream and crawl-stream runs must share the same run_id (end-to-end correlation)")
+
+	// Redaction audit. The Authorization header on outbound requests is
+	// "Basic " + base64("alice:secret-token-xyz"). Even at --log-level
+	// trace, NEITHER the base64-encoded credential NOR the raw token may
+	// appear anywhere in the captured stderr — and the "REDACTED"
+	// placeholder MUST appear at least once where the header value
+	// would otherwise have been logged.
+	expectedB64 := base64.StdEncoding.EncodeToString([]byte("alice:secret-token-xyz"))
+	assert.NotContains(t, stderr, expectedB64,
+		"redaction audit: base64-encoded Authorization credential leaked in stderr")
+	assert.NotContains(t, stderr, "secret-token-xyz",
+		"redaction audit: raw token leaked in stderr")
+	assert.Contains(t, stderr, "REDACTED",
+		"redaction audit: expected REDACTED placeholder somewhere in stderr (Authorization header should be replaced)")
 }

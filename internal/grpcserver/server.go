@@ -38,10 +38,36 @@ type Server struct {
 	crawlFn func(ctx context.Context, cfg gojira.Config, startKeys []string, sink gojira.Sink) (gojira.Summary, error)
 }
 
+// Option mutates a Server during construction. Options are applied
+// after the production defaults are wired by [NewServer], so they
+// always overwrite — never accidentally pre-empt — the default
+// behavior. Options are intended primarily for tests (see
+// [WithGetIssueFunc] and [WithCrawlFunc]) but are exported so
+// integration tests outside the package can compose them.
+type Option func(*Server)
+
+// WithGetIssueFunc overrides the function used by [Server.GetIssue]
+// to fetch+parse+extract a single issue. The default closes over
+// [gojira.GetIssue]; tests inject a fake to avoid touching the
+// network or a live Jira tenant.
+func WithGetIssueFunc(fn func(ctx context.Context, cfg gojira.Config, key string) (parse.Issue, []extract.Reference, error)) Option {
+	return func(s *Server) { s.getIssueFn = fn }
+}
+
+// WithCrawlFunc overrides the function used by [Server.Crawl] to
+// run a recursive crawl. The default closes over [gojira.Crawl];
+// tests inject a fake that emits events through the supplied sink
+// without performing real fetches.
+func WithCrawlFunc(fn func(ctx context.Context, cfg gojira.Config, startKeys []string, sink gojira.Sink) (gojira.Summary, error)) Option {
+	return func(s *Server) { s.crawlFn = fn }
+}
+
 // NewServer constructs a Server with the given runtime configuration and
-// the production gojira facade wired into the injectable seams.
-func NewServer(cfg gojira.Config) *Server {
-	return &Server{
+// the production gojira facade wired into the injectable seams. Each
+// supplied [Option] is applied after the defaults, allowing tests to
+// substitute fakes without touching unexported fields.
+func NewServer(cfg gojira.Config, opts ...Option) *Server {
+	s := &Server{
 		cfg: cfg,
 		getIssueFn: func(ctx context.Context, cfg gojira.Config, key string) (parse.Issue, []extract.Reference, error) {
 			return gojira.GetIssue(ctx, cfg, key)
@@ -50,6 +76,10 @@ func NewServer(cfg gojira.Config) *Server {
 			return gojira.Crawl(ctx, cfg, startKeys, sink)
 		},
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Classify classifies a link or bare issue key into one of four kinds.

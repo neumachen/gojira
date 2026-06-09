@@ -99,6 +99,7 @@ GitHub pull request links:
 - Prefer table-driven tests.
 - Use fixtures and golden files where helpful.
 - Avoid live Jira/GitHub calls in unit tests.
+- Place integration / end-to-end tests (those exercising the public facade across packages, using `httptest` fakes and `testdata` fixtures) in the dedicated `integtest` package at the module root — never in the root package. Keep package-local unit tests (white-box `package x`, or `package x_test` colocated with the code they cover) next to their source.
 - Run `gofmt` on changed Go files.
 - Avoid unrelated rewrites or drive-by cleanup.
 
@@ -133,6 +134,24 @@ code is committed under `gen/gojira/v1/`. After editing the proto, run:
 
 This runs `buf lint` then `buf generate`. Commit the regenerated
 `*.pb.go` and `*_grpc.pb.go` files alongside the proto change.
+
+### Test layout
+
+Integration and end-to-end tests live in the `integtest` package at the
+module root (`integtest/`), together with their `testdata/` fixtures.
+This keeps the module-root package (`github.com/neumachen/gojira`)
+production-only and gives cross-package acceptance tests a single home.
+
+- New integration/E2E tests (those that import the public `gojira`,
+  `client`, or `classify` packages and drive them through `httptest`
+  servers or fixture files) MUST be added under `integtest/`, in
+  `package integtest`.
+- Fixtures consumed by those tests live under `integtest/testdata/`
+  and are read with paths relative to the package directory (e.g.
+  `filepath.Join("testdata", "acceptance", name)`).
+- Package-local unit tests stay with the code they test (e.g.
+  `internal/crawl/crawl_test.go`, `client/*_test.go`). Do not move
+  those into `integtest`.
 
 ### Write operations
 

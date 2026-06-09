@@ -134,6 +134,10 @@
         "render_null_custom_fields": {
           "type": "boolean",
           "default": false
+        },
+        "emit_graph": {
+          "type": "boolean",
+          "default": false
         }
       }
     },

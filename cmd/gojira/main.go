@@ -126,6 +126,7 @@ func allEnvKeys() []string {
 		"GOJIRA_CRAWL_DEV_STATUS_APPLICATIONS",
 		"GOJIRA_CRAWL_DEV_STATUS_DATA_TYPES",
 		"GOJIRA_CRAWL_RENDER_NULL_CUSTOM_FIELDS",
+		"GOJIRA_CRAWL_EMIT_GRAPH",
 	}
 	// Deprecated v0.1 flat aliases — sourced from the config package
 	// so the table is the single source of truth.
@@ -482,6 +483,11 @@ func crawlFlags(env map[string]string) []cli.Flag {
 			Usage:   "Render custom fields whose value is JSON null (default false skips them)",
 			Sources: src("GOJIRA_RENDER_NULL_CUSTOM_FIELDS"),
 		},
+		&cli.BoolFlag{
+			Name:    "graph",
+			Usage:   "Write graph.json and graph.d2 (D2 source) at the output-dir root",
+			Sources: src("GOJIRA_EMIT_GRAPH"),
+		},
 	}
 }
 
@@ -633,6 +639,7 @@ func configToKV(cfg gojira.Config) map[string]string {
 		"GOJIRA_DEV_STATUS_APPLICATIONS":   strings.Join(cfg.DevStatusApplications, ","),
 		"GOJIRA_DEV_STATUS_DATA_TYPES":     strings.Join(cfg.DevStatusDataTypes, ","),
 		"GOJIRA_RENDER_NULL_CUSTOM_FIELDS": bool01(cfg.RenderNullCustomFields),
+		"GOJIRA_EMIT_GRAPH":                bool01(cfg.EmitGraph),
 	}
 }
 
@@ -722,6 +729,13 @@ func buildConfigKV(cmd *cli.Command) map[string]string {
 			kv["GOJIRA_RENDER_NULL_CUSTOM_FIELDS"] = "true"
 		} else {
 			kv["GOJIRA_RENDER_NULL_CUSTOM_FIELDS"] = "false"
+		}
+	}
+	if cmd.IsSet("graph") {
+		if cmd.Bool("graph") {
+			kv["GOJIRA_EMIT_GRAPH"] = "true"
+		} else {
+			kv["GOJIRA_EMIT_GRAPH"] = "false"
 		}
 	}
 

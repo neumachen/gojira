@@ -89,6 +89,7 @@ func TestApp_ToConfig_DefaultsRoundTrip(t *testing.T) {
 		got.DevStatusDataTypes,
 		"DevStatusDataTypes")
 	assert.False(t, got.RenderNullCustomFields, "RenderNullCustomFields")
+	assert.False(t, got.EmitGraph, "EmitGraph")
 
 	// Log block.
 	assert.Equal(t, "info", got.LogLevel, "LogLevel")
@@ -123,6 +124,7 @@ func TestApp_ToConfig_FullyPopulated(t *testing.T) {
 			DevStatusApplications:  []string{"Bitbucket", "GitLab"},
 			DevStatusDataTypes:     []string{"pullrequest", "commit"},
 			RenderNullCustomFields: true,
+			EmitGraph:              true,
 		},
 		Output: OutputSettings{Dir: "/tmp/jira-mirror"},
 		Log:    LogSettings{Level: "debug", Format: "json"},
@@ -148,6 +150,7 @@ func TestApp_ToConfig_FullyPopulated(t *testing.T) {
 		DevStatusApplications:  []string{"Bitbucket", "GitLab"},
 		RenderNullCustomFields: true,
 		DevStatusDataTypes:     []string{"pullrequest", "commit"},
+		EmitGraph:              true,
 	}
 
 	assert.Equal(t, want, a.ToConfig())

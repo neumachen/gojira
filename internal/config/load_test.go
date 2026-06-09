@@ -45,6 +45,7 @@ crawl:
   dev_status_applications: [GitHub]
   dev_status_data_types: [pullrequest, branch, commit, repository, build]
   render_null_custom_fields: false
+  emit_graph: false
 log:
   level: info
   format: text

@@ -1,4 +1,4 @@
-// Package gojira_test contains end-to-end tests for the public library facade.
+// Package integtest contains end-to-end tests for the public library facade.
 //
 // Each test uses httptest.NewServer to fake the Jira API and t.TempDir() for
 // output. No live network calls are made.
@@ -11,7 +11,7 @@
 //   - AC 6  (deduplication): Crawl with A↔B cycle fetches each exactly once.
 //   - AC 9  (permission-denied stub): Crawl with 403 writes a stub.
 //   - AC 10 (skip-if-exists): Crawl skips issues whose index.md already exists.
-package gojira_test
+package integtest
 
 import (
 	"bytes"

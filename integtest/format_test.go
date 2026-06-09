@@ -1,5 +1,5 @@
-// Package gojira_test — unit tests for the OutputFormat enum.
-package gojira_test
+// Package integtest — unit tests for the OutputFormat enum.
+package integtest
 
 import (
 	"testing"

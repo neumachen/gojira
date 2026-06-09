@@ -3,7 +3,7 @@
 // cfg.Site at srv.URL, and exercises the corresponding facade function.
 // No live Jira; no WithHTTPClient injection — the default client.New
 // path reaches the test server directly through its URL.
-package gojira_test
+package integtest
 
 import (
 	"context"

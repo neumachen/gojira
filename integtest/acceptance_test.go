@@ -1,4 +1,4 @@
-// Package gojira_test contains the end-to-end acceptance harness for the
+// Package integtest contains the end-to-end acceptance harness for the
 // gojira library facade.
 //
 // Each test function corresponds to exactly one PRD §13 acceptance criterion
@@ -8,7 +8,7 @@
 // No live network calls are made. Output is written to t.TempDir().
 //
 // AC 16, 17, and 18 (CLI-level) live in cmd/gojira/acceptance_test.go.
-package gojira_test
+package integtest
 
 import (
 	"bytes"

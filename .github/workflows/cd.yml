@@ -1,0 +1,148 @@
+# Continuous Delivery (CD) workflow.
+#
+# This is the delivery half of the pipeline — CI (.github/workflows/ci.yml)
+# still owns per-PR correctness; CD re-tests the exact ref being shipped and
+# then publishes a multi-arch container image to GHCR.
+#
+# Trigger model:
+#   - push to main        -> publish ghcr.io/neumachen/gojira:{latest,main,sha-<short>}
+#   - push to a v* tag    -> publish ghcr.io/neumachen/gojira:{X.Y.Z,X.Y,X}
+#                            ("latest" is NOT moved by tag pushes — it tracks main only)
+#
+# The `test` job is the gate: nothing is pushed to GHCR unless `go test ./...`
+# (incl. the race detector) passes on the exact commit being released.
+
+name: CD
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+# Serialize CD runs per ref so concurrent pushes don't race each other to the
+# registry. We deliberately do NOT cancel an in-progress run — once a publish
+# has started, let it finish (especially important for tag releases).
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Job 1: re-verify the exact ref before anything is published.
+  # Mirrors ci.yml so a green CD test job means the shipped artifact has been
+  # built, vetted, and tested (including -race) on the same commit.
+  test:
+    name: re-test ref before publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Verify modules are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "::error::gofmt would change the following files:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./... -count=1
+
+      - name: Test (race detector)
+        run: go test ./... -count=1 -race
+
+      - name: Smoke test the CLI binary
+        run: |
+          go build -o /tmp/gojira ./cmd/gojira
+          /tmp/gojira --version
+          /tmp/gojira --help
+
+  # Job 2: build a multi-arch image and push it to GHCR.
+  # Only runs if `test` passed — this is the publish gate.
+  # Tag policy (enforced by docker/metadata-action below):
+  #   - `latest` is applied ONLY on the default branch (main), via the
+  #     `enable={{is_default_branch}}` guard on the raw tag line. We also set
+  #     `flavor: latest=false` so the action's own auto-latest behavior is off;
+  #     the single guarded raw line is the only path that can produce `latest`.
+  #   - Version tag pushes (vX.Y.Z) are immutable releases: they produce
+  #     X.Y.Z / X.Y / X but never move `latest`.
+  build-push:
+    name: build and push image
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/neumachen/gojira
+          # Disable the action's built-in latest handling; the guarded raw
+          # line below is the sole producer of `latest`.
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=sha,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # steps.meta.outputs.version resolves to the git tag on tag builds
+          # (so the embedded gojira.Version stamps the real release, e.g.
+          # v0.1.0) and to a ref-derived string on main builds (acceptable
+          # for the floating `latest`/`main` dev images).
+          build-args: |
+            GOJIRA_VERSION=${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false

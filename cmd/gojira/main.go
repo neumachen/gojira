@@ -340,6 +340,11 @@ Exit codes:
 		Commands: []*cli.Command{
 			crawlCommand(env, signalled),
 			serveCommand(env, signalled),
+			createCommand(env),
+			updateCommand(env),
+			commentCommand(env),
+			transitionsCommand(env),
+			transitionCommand(env),
 		},
 		// We map errors to exit codes ourselves in run(); cli's default
 		// would call HandleExitCoder which may os.Exit. Suppress it.

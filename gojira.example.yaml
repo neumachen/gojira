@@ -64,6 +64,7 @@ crawl:
     - repository
     - build
   render_null_custom_fields: false
+  emit_graph: false             # write graph.json + graph.d2 (D2 source) at the output-dir root
 
 # ---------------------------------------------------------------------------
 # Logging.

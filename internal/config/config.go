@@ -206,6 +206,14 @@ type Config struct {
 	// Default: ["pullrequest", "branch", "commit", "repository",
 	// "build"].
 	DevStatusDataTypes []string `env:"GOJIRA_DEV_STATUS_DATA_TYPES,default=pullrequest|branch|commit|repository|build,validate=oneof_dev_status_data_types"`
+
+	// EmitGraph controls whether the crawler writes graph.json and
+	// graph.d2 (a D2-language diagram source) at the output-dir root
+	// describing the crawled issue graph. Default: false. The graph
+	// is always best-effort: a failure to write either file degrades
+	// to a warning and never fails the crawl. Sourced from
+	// GOJIRA_EMIT_GRAPH.
+	EmitGraph bool `env:"GOJIRA_EMIT_GRAPH,default=false"`
 }
 
 // validLogLevels is the set of accepted GOJIRA_LOG_LEVEL values. The
@@ -508,6 +516,8 @@ func envKeyForField(field string) string {
 		return "GOJIRA_DEV_STATUS_DATA_TYPES"
 	case "RenderNullCustomFields":
 		return "GOJIRA_RENDER_NULL_CUSTOM_FIELDS"
+	case "EmitGraph":
+		return "GOJIRA_EMIT_GRAPH"
 	default:
 		return field
 	}

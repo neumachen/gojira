@@ -82,6 +82,14 @@ type CrawlSettings struct {
 	// fields" section. Sourced from
 	// GOJIRA_CRAWL_RENDER_NULL_CUSTOM_FIELDS. Default: false.
 	RenderNullCustomFields bool `yaml:"render_null_custom_fields" json:"render_null_custom_fields" env:"GOJIRA_CRAWL_RENDER_NULL_CUSTOM_FIELDS"`
+
+	// EmitGraph controls whether the crawler writes a graph.json /
+	// graph.d2 pair at the output-dir root summarising the crawled
+	// issue graph. The two files are independent of the per-issue
+	// Markdown output and never block it: a failure to write them
+	// degrades to a warning, never an error. Sourced from
+	// GOJIRA_CRAWL_EMIT_GRAPH. Default: false.
+	EmitGraph bool `yaml:"emit_graph" json:"emit_graph" env:"GOJIRA_CRAWL_EMIT_GRAPH"`
 }
 
 // Default crawl-tuning constants. These mirror the flat [Config]
@@ -139,5 +147,6 @@ func DefaultCrawlSettings() CrawlSettings {
 		DevStatusApplications:  apps,
 		DevStatusDataTypes:     dts,
 		RenderNullCustomFields: false,
+		EmitGraph:              false,
 	}
 }

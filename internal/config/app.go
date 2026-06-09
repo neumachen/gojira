@@ -110,5 +110,6 @@ func (a App) ToConfig() Config {
 		DevStatusApplications:  apps,
 		RenderNullCustomFields: a.Crawl.RenderNullCustomFields,
 		DevStatusDataTypes:     dts,
+		EmitGraph:              a.Crawl.EmitGraph,
 	}
 }

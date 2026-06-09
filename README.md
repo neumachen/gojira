@@ -105,6 +105,7 @@ flag overrides the env var when both are set.
 | `--dev-status-applications`   | `GOJIRA_DEV_STATUS_APPLICATIONS` | `GitHub`   | Comma-separated Dev Status integration types. |
 | `--dev-status-data-types`     | `GOJIRA_DEV_STATUS_DATA_TYPES` | `pullrequest,branch,commit,repository,build` | Comma-separated dataType values to query. |
 | `--render-null-custom-fields` | `GOJIRA_RENDER_NULL_CUSTOM_FIELDS` | `false`  | Include custom fields whose value is JSON null. |
+| `--graph`                     | `GOJIRA_EMIT_GRAPH`           | `false`       | Write `graph.json` and `graph.d2` (D2 source) at the output-dir root. |
 | `--log-level`                 | `GOJIRA_LOG_LEVEL`            | `info`        | One of: `error`, `warn`, `info`, `debug`. |
 | `--log-format`                | `GOJIRA_LOG_FORMAT`           | `text`        | One of: `text` (human-readable), `json` (one JSON object per line). |
 | `--config`                    | `GOJIRA_CONFIG_FILE`          | (discovered)  | Path to a YAML config file (see [Configuration](#configuration)). |
@@ -189,6 +190,7 @@ of `gojira.yaml`; pick whichever surface fits the deployment best.
 | `GOJIRA_CRAWL_DEV_STATUS_APPLICATIONS`        | `crawl.dev_status_applications`      | `GitHub` |
 | `GOJIRA_CRAWL_DEV_STATUS_DATA_TYPES`          | `crawl.dev_status_data_types`        | `pullrequest,branch,commit,repository,build` |
 | `GOJIRA_CRAWL_RENDER_NULL_CUSTOM_FIELDS`      | `crawl.render_null_custom_fields`    | `false` |
+| `GOJIRA_CRAWL_EMIT_GRAPH`                     | `crawl.emit_graph`                   | `false` |
 | `GOJIRA_LOG_LEVEL`                            | `log.level`                          | `info` |
 | `GOJIRA_LOG_FORMAT`                           | `log.format`                         | `text` |
 
@@ -217,6 +219,7 @@ are set, the canonical key wins — set both only during a migration.
 | `GOJIRA_DEV_STATUS_APPLICATIONS`  | `GOJIRA_CRAWL_DEV_STATUS_APPLICATIONS`      |
 | `GOJIRA_DEV_STATUS_DATA_TYPES`    | `GOJIRA_CRAWL_DEV_STATUS_DATA_TYPES`        |
 | `GOJIRA_RENDER_NULL_CUSTOM_FIELDS`| `GOJIRA_CRAWL_RENDER_NULL_CUSTOM_FIELDS`    |
+| `GOJIRA_EMIT_GRAPH`               | `GOJIRA_CRAWL_EMIT_GRAPH`                   |
 
 `GOJIRA_OUTPUT_DIR`, `GOJIRA_LOG_LEVEL`, and `GOJIRA_LOG_FORMAT`
 already use canonical names in v0.1 and need no migration.

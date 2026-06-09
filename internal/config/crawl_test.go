@@ -34,6 +34,7 @@ func TestDefaultCrawlSettings(t *testing.T) {
 		"DevStatusDataTypes",
 	)
 	assert.False(t, got.RenderNullCustomFields, "RenderNullCustomFields")
+	assert.False(t, got.EmitGraph, "EmitGraph")
 }
 
 // TestDefaultCrawlSettings_SlicesAreIndependent guarantees mutating
@@ -85,6 +86,7 @@ func TestCrawlSettings_StructTags(t *testing.T) {
 		{"DevStatusApplications", "GOJIRA_CRAWL_DEV_STATUS_APPLICATIONS", "dev_status_applications", "dev_status_applications"},
 		{"DevStatusDataTypes", "GOJIRA_CRAWL_DEV_STATUS_DATA_TYPES", "dev_status_data_types", "dev_status_data_types"},
 		{"RenderNullCustomFields", "GOJIRA_CRAWL_RENDER_NULL_CUSTOM_FIELDS", "render_null_custom_fields", "render_null_custom_fields"},
+		{"EmitGraph", "GOJIRA_CRAWL_EMIT_GRAPH", "emit_graph", "emit_graph"},
 	}
 
 	for _, tc := range cases {

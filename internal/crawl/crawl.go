@@ -56,6 +56,7 @@ import (
 	"github.com/neumachen/gojira/internal/events"
 	"github.com/neumachen/gojira/internal/extract"
 	"github.com/neumachen/gojira/internal/fetch"
+	"github.com/neumachen/gojira/internal/graph"
 	"github.com/neumachen/gojira/internal/hierarchy"
 	"github.com/neumachen/gojira/internal/output"
 	"github.com/neumachen/gojira/internal/parse"
@@ -246,6 +247,12 @@ type crawler struct {
 	phaseMu        sync.Mutex
 	phaseCounts    map[string]int
 	phaseDurations map[string]time.Duration
+
+	// graph collects nodes and edges describing the crawled issue
+	// graph. nil when cfg.EmitGraph is false. Accessed only while
+	// holding c.mu (the collector itself is not safe for concurrent
+	// use).
+	graph *graph.Collector
 }
 
 // noopLogger returns a [*slog.Logger] whose handler always returns false
@@ -751,6 +758,13 @@ func (c *crawler) processIssue(item workItem) error {
 	c.summary.Fetched++
 	c.summary.FetchedKeys = append(c.summary.FetchedKeys, key)
 
+	// Record this issue in the graph collector when enabled. The
+	// Collector is not concurrent-safe, but we are inside the
+	// c.mu critical section so the access is serialized.
+	if c.graph != nil {
+		c.graph.Add(issue, refs)
+	}
+
 	// Discover and enqueue outbound Jira references (still holding c.mu
 	// so that enqueue's channel send is protected against concurrent
 	// closeQueueLocked calls).
@@ -1121,6 +1135,12 @@ func CrawlWithEnrichers(
 		phaseCounts:    make(map[string]int),
 		phaseDurations: make(map[string]time.Duration),
 	}
+	// Opt-in graph collector. Constructing inside CrawlWithEnrichers
+	// keeps the exported signature unchanged: the feature is driven
+	// entirely by cfg.EmitGraph through the standard config cascade.
+	if cfg.EmitGraph {
+		c.graph = graph.NewCollector()
+	}
 	// Tag every record emitted by the orchestrator with
 	// trace_stream=stream so a consumer can distinguish orchestration
 	// lines from the HTTP RoundTripper's response-stream lines (which
@@ -1253,6 +1273,13 @@ func CrawlWithEnrichers(
 		slog.Any("time_by_phase_ms", durationMsMap(c.summary.APITimeByPhase)),
 	)
 
+	// Best-effort graph export. A failure to write either file
+	// degrades to a warn-level log line; the Markdown output is the
+	// primary artifact and the crawl exit code must not change.
+	if c.graph != nil {
+		writeGraphFiles(crawlCtx, c.logger, c.graph.Model(), cfg.OutputDir)
+	}
+
 	// Emit crawl summary event. The Message string is preserved verbatim
 	// for text-only consumers (slog sink, RecordingSink dumps, etc.); the
 	// new Summary field gives structured sinks (e.g. the grpcSink) typed
@@ -1341,4 +1368,59 @@ func outboundKind(k classify.Kind) string {
 	default:
 		return "external"
 	}
+}
+
+// writeGraphFiles persists graph.json and graph.d2 at outputDir.
+// Failures are reported via logger at warn level and intentionally
+// swallowed: the per-issue Markdown is the primary crawl artifact, so
+// a graph-export problem must never fail the run.
+func writeGraphFiles(ctx context.Context, logger *slog.Logger, m graph.Model, outputDir string) {
+	if outputDir == "" {
+		logger.LogAttrs(ctx, slog.LevelWarn, "graph.skipped",
+			slog.String("reason", "empty output_dir"))
+		return
+	}
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		logger.LogAttrs(ctx, slog.LevelWarn, "graph.write_failed",
+			slog.String("path", outputDir),
+			slog.String("error", err.Error()))
+		return
+	}
+
+	jsonBytes, err := graph.RenderJSON(m)
+	if err != nil {
+		logger.LogAttrs(ctx, slog.LevelWarn, "graph.render_failed",
+			slog.String("file", "graph.json"),
+			slog.String("error", err.Error()))
+		return
+	}
+	jsonPath := filepath.Join(outputDir, "graph.json")
+	if err := os.WriteFile(jsonPath, jsonBytes, 0o644); err != nil {
+		logger.LogAttrs(ctx, slog.LevelWarn, "graph.write_failed",
+			slog.String("path", jsonPath),
+			slog.String("error", err.Error()))
+		return
+	}
+
+	d2Src, err := graph.RenderD2(m)
+	if err != nil {
+		logger.LogAttrs(ctx, slog.LevelWarn, "graph.render_failed",
+			slog.String("file", "graph.d2"),
+			slog.String("error", err.Error()))
+		return
+	}
+	d2Path := filepath.Join(outputDir, "graph.d2")
+	if err := os.WriteFile(d2Path, []byte(d2Src), 0o644); err != nil {
+		logger.LogAttrs(ctx, slog.LevelWarn, "graph.write_failed",
+			slog.String("path", d2Path),
+			slog.String("error", err.Error()))
+		return
+	}
+
+	logger.LogAttrs(ctx, slog.LevelInfo, "graph.written",
+		slog.String("json", jsonPath),
+		slog.String("d2", d2Path),
+		slog.Int("nodes", len(m.Nodes)),
+		slog.Int("edges", len(m.Edges)),
+	)
 }

@@ -349,6 +349,7 @@ Exit codes:
 			transitionsCommand(env),
 			transitionCommand(env),
 			initCommand(env),
+			mcpCommand(env, signalled),
 		},
 		// We map errors to exit codes ourselves in run(); cli's default
 		// would call HandleExitCoder which may os.Exit. Suppress it.

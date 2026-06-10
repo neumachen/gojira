@@ -127,6 +127,8 @@ func allEnvKeys() []string {
 		"GOJIRA_CRAWL_DEV_STATUS_DATA_TYPES",
 		"GOJIRA_CRAWL_RENDER_NULL_CUSTOM_FIELDS",
 		"GOJIRA_CRAWL_EMIT_GRAPH",
+		"GOJIRA_MCP_MODE",
+		"GOJIRA_MCP_ALLOW_WRITES",
 	}
 	// Deprecated v0.1 flat aliases — sourced from the config package
 	// so the table is the single source of truth.

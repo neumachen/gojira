@@ -151,6 +151,22 @@
           "description": "gRPC server bind address."
         }
       }
+    },
+    "mcp": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["self", "bridge"],
+          "description": "MCP server backend; required by `gojira mcp` at startup, but absent or empty is acceptable for non-mcp commands."
+        },
+        "allow_writes": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, expose the mutating MCP tools (create/update/comment/transition); when false (default), they are absent from tools/list."
+        }
+      }
     }
   }
 }

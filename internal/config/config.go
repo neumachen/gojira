@@ -214,6 +214,21 @@ type Config struct {
 	// to a warning and never fails the crawl. Sourced from
 	// GOJIRA_EMIT_GRAPH.
 	EmitGraph bool `env:"GOJIRA_EMIT_GRAPH,default=false"`
+
+	// MCPMode selects the `gojira mcp` server backend: "self" (run
+	// the gojira facade in-process) or "bridge" (forward to a
+	// running gojira serve gRPC server). It has NO embedded default:
+	// the mcp command enforces presence and enum at startup, so
+	// non-mcp commands (crawl/serve) keep loading configs without
+	// an mcp section. Sourced from GOJIRA_MCP_MODE.
+	MCPMode string `env:"GOJIRA_MCP_MODE"`
+
+	// MCPAllowWrites gates the mutating MCP tools (create_issue,
+	// update_issue, add_comment, transition_issue) on the MCP
+	// server. When false (the default), those tools are absent from
+	// the server's tools/list response. Sourced from
+	// GOJIRA_MCP_ALLOW_WRITES. Default: false.
+	MCPAllowWrites bool `env:"GOJIRA_MCP_ALLOW_WRITES,default=false"`
 }
 
 // validLogLevels is the set of accepted GOJIRA_LOG_LEVEL values. The
@@ -518,6 +533,10 @@ func envKeyForField(field string) string {
 		return "GOJIRA_RENDER_NULL_CUSTOM_FIELDS"
 	case "EmitGraph":
 		return "GOJIRA_EMIT_GRAPH"
+	case "MCPMode":
+		return "GOJIRA_MCP_MODE"
+	case "MCPAllowWrites":
+		return "GOJIRA_MCP_ALLOW_WRITES"
 	default:
 		return field
 	}

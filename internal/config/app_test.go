@@ -90,6 +90,8 @@ func TestApp_ToConfig_DefaultsRoundTrip(t *testing.T) {
 		"DevStatusDataTypes")
 	assert.False(t, got.RenderNullCustomFields, "RenderNullCustomFields")
 	assert.False(t, got.EmitGraph, "EmitGraph")
+	assert.Equal(t, "", got.MCPMode, "MCPMode (no embedded default by design)")
+	assert.False(t, got.MCPAllowWrites, "MCPAllowWrites")
 
 	// Log block.
 	assert.Equal(t, "info", got.LogLevel, "LogLevel")
@@ -128,6 +130,7 @@ func TestApp_ToConfig_FullyPopulated(t *testing.T) {
 		},
 		Output: OutputSettings{Dir: "/tmp/jira-mirror"},
 		Log:    LogSettings{Level: "debug", Format: "json"},
+		MCP:    MCPSettings{Mode: "self", AllowWrites: true},
 	}
 
 	want := Config{
@@ -151,6 +154,8 @@ func TestApp_ToConfig_FullyPopulated(t *testing.T) {
 		RenderNullCustomFields: true,
 		DevStatusDataTypes:     []string{"pullrequest", "commit"},
 		EmitGraph:              true,
+		MCPMode:                "self",
+		MCPAllowWrites:         true,
 	}
 
 	assert.Equal(t, want, a.ToConfig())

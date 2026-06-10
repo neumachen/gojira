@@ -351,3 +351,76 @@ func TestDecodeYAMLToMap_NonObjectRoot(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrInvalidValue)
 }
+
+// ---------------------------------------------------------------------------
+// Phase B regression tests — mcp section optional, mode enum enforced
+// ---------------------------------------------------------------------------
+
+// TestLoadApp_MCP_SectionPresent asserts a YAML file carrying an
+// `mcp:` section round-trips Mode and AllowWrites onto the flat
+// Config (MCPMode / MCPAllowWrites). This is the happy path the
+// `gojira mcp` command will rely on.
+func TestLoadApp_MCP_SectionPresent(t *testing.T) {
+	const withMCP = `schema: gojira.config.v1
+jira:
+  base_url: https://x.atlassian.net
+  email: x@example.com
+  api_token: tok
+output:
+  dir: /tmp/x
+mcp:
+  mode: self
+  allow_writes: true
+`
+	app, err := LoadApp(LoadOptions{YAML: strings.NewReader(withMCP)})
+	require.NoError(t, err)
+	cfg := app.ToConfig()
+	assert.Equal(t, "self", cfg.MCPMode)
+	assert.True(t, cfg.MCPAllowWrites)
+}
+
+// TestLoadApp_MCP_SectionAbsent_StillValidates is the load-bearing
+// regression guard for the "Phase B must not break crawl/serve
+// configs" invariant: a YAML file that omits the `mcp:` section
+// entirely must continue to pass Layer-1 schema validation, decode
+// cleanly into App, and yield zero-valued MCP fields on the flat
+// Config (empty Mode, false AllowWrites).
+func TestLoadApp_MCP_SectionAbsent_StillValidates(t *testing.T) {
+	const withoutMCP = `schema: gojira.config.v1
+jira:
+  base_url: https://x.atlassian.net
+  email: x@example.com
+  api_token: tok
+output:
+  dir: /tmp/x
+`
+	app, err := LoadApp(LoadOptions{YAML: strings.NewReader(withoutMCP)})
+	require.NoError(t, err,
+		"a YAML without mcp: must continue to validate after Phase B")
+	cfg := app.ToConfig()
+	assert.Equal(t, "", cfg.MCPMode,
+		"MCPMode must be empty when the YAML has no mcp: section")
+	assert.False(t, cfg.MCPAllowWrites,
+		"MCPAllowWrites must default to false when mcp: is absent")
+}
+
+// TestLoadApp_MCP_InvalidMode_FailsSchema asserts the schema's
+// enum constraint on `mcp.mode` is enforced by Layer-1 validation.
+// An invalid mode in the YAML fails before envext gets near it,
+// wrapping ErrInvalidValue so callers can errors.Is-classify it.
+func TestLoadApp_MCP_InvalidMode_FailsSchema(t *testing.T) {
+	const badMCP = `schema: gojira.config.v1
+jira:
+  base_url: https://x.atlassian.net
+  email: x@example.com
+  api_token: tok
+output:
+  dir: /tmp/x
+mcp:
+  mode: invalid
+`
+	_, err := LoadApp(LoadOptions{YAML: strings.NewReader(badMCP)})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidValue,
+		"invalid mcp.mode enum must wrap ErrInvalidValue (Layer 1)")
+}

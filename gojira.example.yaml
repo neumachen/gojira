@@ -83,3 +83,17 @@ log:
 # ---------------------------------------------------------------------------
 server:
   address: 127.0.0.1:50051
+
+# ---------------------------------------------------------------------------
+# MCP server (Phase B). `gojira mcp` runs a Model Context Protocol server
+# over the stdio transport for AI hosts (Claude Desktop, Cursor, Zed, ...).
+# mode is required by `gojira mcp` only — non-mcp commands keep loading
+# configs that omit the entire mcp: section. Override mode with
+# GOJIRA_MCP_MODE and allow_writes with GOJIRA_MCP_ALLOW_WRITES.
+# ---------------------------------------------------------------------------
+# mcp:
+#   mode: self          # required by `gojira mcp` only; one of self|bridge
+#                       # (bridge forwards each tool call to server.address)
+#   allow_writes: false # set true to expose mutating tools
+#                       # (create_issue / update_issue / add_comment /
+#                       #  transition_issue) — read tools are always exposed

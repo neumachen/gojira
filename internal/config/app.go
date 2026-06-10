@@ -56,6 +56,10 @@ type App struct {
 
 	// Server holds the gRPC server settings.
 	Server ServerSettings `yaml:"server" json:"server" env:",nested"`
+
+	// MCP holds the Model Context Protocol server settings used by
+	// `gojira mcp`. Optional for all other commands.
+	MCP MCPSettings `yaml:"mcp" json:"mcp" env:",nested"`
 }
 
 // DefaultApp returns an [App] populated with [SchemaVersion] and each
@@ -71,6 +75,7 @@ func DefaultApp() App {
 		Output:     DefaultOutputSettings(),
 		Log:        DefaultLogSettings(),
 		Server:     DefaultServerSettings(),
+		MCP:        DefaultMCPSettings(),
 	}
 }
 
@@ -111,5 +116,7 @@ func (a App) ToConfig() Config {
 		RenderNullCustomFields: a.Crawl.RenderNullCustomFields,
 		DevStatusDataTypes:     dts,
 		EmitGraph:              a.Crawl.EmitGraph,
+		MCPMode:                a.MCP.Mode,
+		MCPAllowWrites:         a.MCP.AllowWrites,
 	}
 }

@@ -218,6 +218,10 @@ func TestGuard_Exempt_HelpAndVersion(t *testing.T) {
 	}{
 		{"help", []string{"gojira", "--help"}},
 		{"version", []string{"gojira", "--version"}},
+		// Phase 2: init must be exempt from the guard so it is always
+		// the way out of a no-config state. --help variant keeps the
+		// command from actually trying to write anything.
+		{"init_help", []string{"gojira", "init", "--help"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

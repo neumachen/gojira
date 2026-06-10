@@ -209,6 +209,10 @@ func runCreate(ctx context.Context, cmd *cli.Command, env map[string]string) err
 	stderr := stderrOf(cmd)
 	stdout := stdoutOf(cmd)
 
+	if err := requireConfig(cmd, env); err != nil {
+		return err
+	}
+
 	project := cmd.String("project")
 	if project == "" {
 		fmt.Fprintln(stderr, "error: --project is required")
@@ -288,6 +292,10 @@ func runUpdate(ctx context.Context, cmd *cli.Command, env map[string]string) err
 	stderr := stderrOf(cmd)
 	stdout := stdoutOf(cmd)
 
+	if err := requireConfig(cmd, env); err != nil {
+		return err
+	}
+
 	key, err := requireOneKey(cmd, stderr)
 	if err != nil {
 		return err
@@ -363,6 +371,10 @@ func runComment(ctx context.Context, cmd *cli.Command, env map[string]string) er
 	stderr := stderrOf(cmd)
 	stdout := stdoutOf(cmd)
 
+	if err := requireConfig(cmd, env); err != nil {
+		return err
+	}
+
 	key, err := requireOneKey(cmd, stderr)
 	if err != nil {
 		return err
@@ -407,6 +419,10 @@ func transitionsCommand(env map[string]string) *cli.Command {
 func runTransitions(ctx context.Context, cmd *cli.Command, env map[string]string) error {
 	stderr := stderrOf(cmd)
 	stdout := stdoutOf(cmd)
+
+	if err := requireConfig(cmd, env); err != nil {
+		return err
+	}
 
 	key, err := requireOneKey(cmd, stderr)
 	if err != nil {
@@ -458,6 +474,10 @@ func transitionCommand(env map[string]string) *cli.Command {
 func runTransition(ctx context.Context, cmd *cli.Command, env map[string]string) error {
 	stderr := stderrOf(cmd)
 	stdout := stdoutOf(cmd)
+
+	if err := requireConfig(cmd, env); err != nil {
+		return err
+	}
 
 	key, err := requireOneKey(cmd, stderr)
 	if err != nil {

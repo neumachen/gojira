@@ -506,6 +506,10 @@ func runCrawl(ctx context.Context, cmd *cli.Command, env map[string]string, sign
 		stderr = os.Stderr
 	}
 
+	if err := requireConfig(cmd, env); err != nil {
+		return err
+	}
+
 	// Exactly one positional argument: <ISSUE-KEY>.
 	positional := cmd.Args().Slice()
 	if len(positional) == 0 {

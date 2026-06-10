@@ -517,6 +517,102 @@ the proto contract, run [buf](https://buf.build):
 ./scripts/gen-proto.sh   # runs `buf lint` then `buf generate`
 ```
 
+## MCP server (`gojira mcp`)
+
+`gojira mcp` runs gojira as a [Model Context Protocol](https://modelcontextprotocol.io/)
+server over the **stdio transport** so AI hosts (Claude Desktop, Cursor,
+Zed, …) can use gojira's tools directly. The host launches `gojira mcp`
+as a subprocess and speaks JSON-RPC over its stdin/stdout. **stdout is
+reserved for the protocol stream; all logs go to stderr.**
+
+```sh
+# Run from your AI host's mcpServers config (see below); for a manual
+# smoke, you can drive a one-shot handshake yourself:
+gojira mcp --config ~/.config/gojira/config.yaml < your-jsonrpc-frames
+```
+
+`gojira mcp` is guarded by the same require-config check as crawl/serve
+(see [First run](#first-run-gojira-init)) and additionally requires
+`mcp.mode` to be set — it exits 1 with a clear message when `mcp.mode`
+is unset or not one of `self|bridge`.
+
+### Modes
+
+The mode is set via `mcp.mode` in the config file or `GOJIRA_MCP_MODE`
+in the environment. It is **required** for `gojira mcp` and only for
+`gojira mcp` (crawl/serve continue to load configs without an `mcp:`
+section).
+
+- **`self`** — gojira does the Jira work in-process via the library
+  facade. The simplest mode; no extra server to run.
+- **`bridge`** — gojira forwards each tool call to a running
+  `gojira serve` gRPC server at `server.address` (default
+  `127.0.0.1:50051`, override with `GOJIRA_SERVER_ADDRESS` or
+  `--address`). This is the "one shared gRPC backend, many ephemeral
+  MCP processes" topology: a single long-running `gojira serve` is
+  the upstream, and every AI host spawns its own short-lived
+  `gojira mcp` subprocess that bridges to it.
+
+### Tools
+
+The following MCP tools are always available (read-only):
+
+- `classify` — classify an input as Jira key, Jira URL, GitHub PR URL, or external URL
+- `get_issue` — fetch a single Jira issue with its outbound references
+- `crawl` — recursively crawl Jira issues from one or more start keys; returns a summary on completion (emits MCP progress notifications per fetched issue when the host supplies a progress token)
+- `get_graph` — crawl in-memory and return the discovered issue graph as `{nodes, edges}` (no files written)
+- `list_transitions` — list workflow transitions available for an issue
+
+The mutating tools are gated behind `mcp.allow_writes: true`
+(default `false`). When `allow_writes` is false, the write tools are
+**absent from `tools/list`** — an AI cannot mutate Jira until the
+operator explicitly opts in:
+
+- `create_issue`
+- `update_issue`
+- `add_comment`
+- `transition_issue`
+
+### Host configuration
+
+Add an entry to your AI host's MCP servers configuration. The exact
+file location varies by host (Claude Desktop:
+`~/Library/Application Support/Claude/claude_desktop_config.json` on
+macOS; Cursor and Zed have their own per-app paths) but the schema is
+the same:
+
+```json
+{
+  "mcpServers": {
+    "gojira": {
+      "command": "gojira",
+      "args": ["mcp"],
+      "env": {
+        "GOJIRA_SITE": "https://your.atlassian.net",
+        "GOJIRA_USER": "you@example.com",
+        "GOJIRA_TOKEN": "your-api-token",
+        "GOJIRA_MCP_MODE": "self"
+      }
+    }
+  }
+}
+```
+
+For **bridge** mode, set `"GOJIRA_MCP_MODE": "bridge"` and ensure a
+`gojira serve` instance is running on the host; add
+`"GOJIRA_SERVER_ADDRESS": "127.0.0.1:50051"` (or your chosen address)
+if you do not use the default. The `env` block in the host config is
+not the only configuration channel — `gojira init` (or a hand-written
+`~/.config/gojira/config.yaml`) is equivalent, and the same
+require-config guard described in [First run](#first-run-gojira-init)
+applies: at least one of a discovered config file, `--config`, the
+`--site/--user/--token` trio, or the equivalent `GOJIRA_*` env vars
+must be present.
+
+To expose the mutating tools to the host, add
+`"GOJIRA_MCP_ALLOW_WRITES": "true"` to the `env` block (or set
+`mcp.allow_writes: true` in your config file). Default is off.
+
 ## Known limitations (v0.1.0)
 
 - Jira Cloud only. Jira Server / Data Center is out of scope for

@@ -93,7 +93,8 @@ server:
 # ---------------------------------------------------------------------------
 # mcp:
 #   mode: self          # required by `gojira mcp` only; one of self|bridge
-#                       # (bridge forwards each tool call to server.address)
+#                       # (bridge forwards each tool call to server.address,
+#                       #  so a `gojira serve` instance must be running there)
 #   allow_writes: false # set true to expose mutating tools
 #                       # (create_issue / update_issue / add_comment /
 #                       #  transition_issue) — read tools are always exposed

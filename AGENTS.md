@@ -162,6 +162,27 @@ create/update, and surface Jira field-level validation errors. Issue deletion
 is intentionally unsupported. Per AGENTS guardrails, treat write operations as
 mutating actions.
 
+### MCP server
+
+`gojira mcp` runs a Model Context Protocol stdio server so AI hosts can
+use gojira's capabilities as MCP tools. It is config-driven dual-mode
+via the required `mcp.mode`: `self` runs the gojira facade in-process,
+`bridge` forwards every tool call to a running `gojira serve` gRPC
+server at `server.address`. The mutating tools (`create_issue`,
+`update_issue`, `add_comment`, `transition_issue`) are absent from
+`tools/list` unless `mcp.allow_writes: true` is set; the read tools
+(`classify`, `get_issue`, `crawl`, `get_graph`, `list_transitions`) are
+always present. The official Go SDK
+`github.com/modelcontextprotocol/go-sdk` is the new dependency that
+powers this surface.
+
+**Stdout-purity invariant (load-bearing).** In `gojira mcp`, stdout
+carries the MCP JSON-RPC protocol stream — nothing else may be written
+there. Every diagnostic, log line, or error message on the mcp serving
+path MUST go to stderr (see `cmd/gojira/mcp.go` for the wiring). Any
+new code on the MCP path must respect this invariant; the cmd-level
+stdout-purity test in `cmd/gojira/mcp_test.go` is the regression guard.
+
 ### Observability and tracing
 
 `gojira crawl` supports a five-level log ladder (`error`/`warn`/`info`/

@@ -13,11 +13,14 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -161,4 +164,54 @@ func TestMCP_StdoutPurity_StartupGoesToStderr(t *testing.T) {
 			"stdout must not contain runMCP diagnostic text %q (got stdout=%q)",
 			leaked, stdout)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Regression: configToKV must carry mcp.mode / mcp.allow_writes from a
+// file-supplied YAML config. Without the fix, the file-layer Config is
+// re-flattened by configToKV which dropped these MCP keys, so a
+// file-set "mcp.mode: self" came back empty and runMCP wrongly exited 1
+// with the "mcp.mode is required" message.
+//
+// We drive the cmd-layer path end to end via captureRun with --config
+// pointed at a temp YAML carrying the full mcp section, then cancel
+// the context shortly after so Serve returns and the test does not
+// block on stdin. The assertion is that the "mcp.mode is required"
+// error does NOT appear in stderr — i.e. mode survived the flatten.
+// ---------------------------------------------------------------------------
+
+func TestMCP_ConfigFile_CarriesMCPMode_Regression(t *testing.T) {
+	neutralizeXDG(t)
+	outDir := t.TempDir()
+
+	// Write a complete schema-valid config with mcp.mode: self.
+	cfgPath := filepath.Join(t.TempDir(), "gojira.yaml")
+	body := []byte(strings.Join([]string{
+		"schema: gojira.config.v1",
+		"jira:",
+		"  base_url: https://example.atlassian.net",
+		"  email: u@example.com",
+		"  api_token: tok",
+		"output:",
+		"  dir: " + outDir,
+		"mcp:",
+		"  mode: self",
+		"  allow_writes: true",
+		"",
+	}, "\n"))
+	require.NoError(t, os.WriteFile(cfgPath, body, 0o600))
+
+	// 200ms cancel so Serve returns without blocking on stdin.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	_, stderr, _ := captureRun(ctx,
+		[]string{"gojira", "mcp", "--config", cfgPath},
+		map[string]string{}) // no env — file must carry mode through the cascade
+
+	// The bug surfaced this exact string. After the fix, it must NOT
+	// appear: mode was successfully read from the file and survived
+	// the file<env<flag re-flatten through configToKV.
+	assert.NotContains(t, stderr, "mcp.mode is required",
+		"file-supplied mcp.mode must survive configToKV; stderr=%q", stderr)
 }

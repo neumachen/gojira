@@ -203,6 +203,56 @@ func TestGraphExport_Enabled_WritesBothFiles(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// CrawlGraph: in-memory model, no files written
+// ---------------------------------------------------------------------------
+
+// TestCrawlGraph_InMemory_NoFilesWritten exercises the facade's
+// gojira.CrawlGraph path: graph collection is forced on (independent
+// of cfg.EmitGraph) and the model is returned in memory, with NO
+// graph.json or graph.d2 written to disk. This is the contract the
+// gRPC GetGraph handler relies on.
+func TestCrawlGraph_InMemory_NoFilesWritten(t *testing.T) {
+	outputDir := t.TempDir()
+	srv := startGraphServer(t)
+	// EmitGraph deliberately FALSE — CrawlGraph must force collection
+	// regardless and must NOT write files.
+	cfg := graphTestConfig(t, srv.URL, outputDir, false)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	sum, model, err := gojira.CrawlGraph(ctx, cfg, []string{"EXAMPLE-1"}, nil)
+	require.NoError(t, err, "CrawlGraph")
+	require.Equal(t, 2, sum.Fetched, "both issues should be fetched")
+
+	// No graph files on disk — this is the whole point.
+	_, statErr := os.Stat(filepath.Join(outputDir, "graph.json"))
+	assert.True(t, os.IsNotExist(statErr), "graph.json must NOT be written by CrawlGraph; got: %v", statErr)
+	_, statErr = os.Stat(filepath.Join(outputDir, "graph.d2"))
+	assert.True(t, os.IsNotExist(statErr), "graph.d2 must NOT be written by CrawlGraph; got: %v", statErr)
+
+	// In-memory model has the expected shape.
+	byID := map[string]gojira.GraphNode{}
+	for _, n := range model.Nodes {
+		byID[n.ID] = n
+	}
+	require.Contains(t, byID, "EXAMPLE-1")
+	require.Contains(t, byID, "EXAMPLE-2")
+	require.Contains(t, byID, "acme/widget#42")
+	require.Contains(t, byID, "https://docs.example.com/foo")
+	assert.True(t, byID["EXAMPLE-1"].Fetched)
+	assert.True(t, byID["EXAMPLE-2"].Fetched)
+
+	// link edge between the two issues + PR edge + external edge.
+	seen := map[string]bool{}
+	for _, e := range model.Edges {
+		seen[e.From+"|"+e.To+"|"+string(e.Kind)] = true
+	}
+	assert.True(t, seen["EXAMPLE-1|EXAMPLE-2|link"])
+	assert.True(t, seen["EXAMPLE-1|acme/widget#42|pull_request"])
+	assert.True(t, seen["EXAMPLE-1|https://docs.example.com/foo|external"])
+}
+
+// ---------------------------------------------------------------------------
 // EmitGraph=false (default) → no graph files written
 // ---------------------------------------------------------------------------
 

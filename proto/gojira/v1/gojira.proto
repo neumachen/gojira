@@ -27,6 +27,11 @@ service Gojira {
   // per-issue content over the wire is available on demand via GetIssue.
   rpc Crawl(CrawlRequest) returns (stream CrawlEvent);
 
+  // GetGraph runs a recursive crawl IN MEMORY (no files written) and
+  // returns the discovered issue graph as a {nodes, edges} pair. It
+  // mirrors the graph.json schema produced by the CLI's --graph flag.
+  rpc GetGraph(GetGraphRequest) returns (GetGraphResponse);
+
   // CreateIssue creates a new Jira issue and returns its key/id/self URL.
   // When dry_run is set the server returns the request body it WOULD send
   // (in dry_run_body) without contacting Jira.
@@ -607,4 +612,93 @@ message TransitionIssueRequest {
 
 message TransitionIssueResponse {
   bool ok = 1;
+}
+
+// ---------------------------------------------------------------------------
+// GetGraph RPC
+// ---------------------------------------------------------------------------
+
+// GetGraphRequest controls a graph-only crawl: starting keys plus the
+// per-request crawl knobs the server honors via a per-RPC copy of its
+// configured Config (so concurrent RPCs do not race on s.cfg). Zero
+// values fall back to the server's configured defaults.
+message GetGraphRequest {
+  // start_keys are the seed issue keys the crawl begins from. Required.
+  repeated string start_keys = 1;
+
+  // depth_limit caps the crawl depth from each seed; 0 means unlimited.
+  int32 depth_limit = 2;
+
+  // issue_cap caps the total number of issues fetched per call;
+  // 0 means use the server's default (500).
+  int32 issue_cap = 3;
+
+  // time_cap_seconds caps wall-clock time for the call; 0 means unlimited.
+  int32 time_cap_seconds = 4;
+
+  // concurrency sets parallel Jira API requests; 0 means use the
+  // server's default (3).
+  int32 concurrency = 5;
+
+  // include_children controls hierarchy-child discovery via JQL search.
+  bool include_children = 6;
+
+  // include_dev_status controls Dev Status enrichment (PRs, branches, …).
+  bool include_dev_status = 7;
+}
+
+// GraphNode mirrors internal/graph.Node. id is the canonical identifier:
+// for issues the UPPER issue key (e.g. "PROJ-1"); for github_pr the
+// "owner/repo#N" form when parseable, else the URL; for external the URL.
+message GraphNode {
+  // id is the unique node identifier.
+  string id = 1;
+
+  // kind is one of: "issue", "github_pr", "external".
+  string kind = 2;
+
+  // label is the human-readable label used by the D2 diagram form.
+  string label = 3;
+
+  // status is the Jira status name; ISSUE-ONLY, may be empty.
+  string status = 4;
+
+  // type is the Jira issue type name; ISSUE-ONLY, may be empty.
+  string type = 5;
+
+  // assignee is the assignee display name; ISSUE-ONLY, may be empty.
+  string assignee = 6;
+
+  // url is the canonical URL for the node (SourceURL for issues; the
+  // PR or external URL otherwise).
+  string url = 7;
+
+  // fetched is true if this issue node was actually fetched in the
+  // crawl. ISSUE-ONLY; always false for github_pr and external nodes.
+  bool fetched = 8;
+}
+
+// GraphEdge mirrors internal/graph.Edge. The directed relationship
+// from -> to is labeled by kind plus an optional human label.
+message GraphEdge {
+  // from is the source node id.
+  string from = 1;
+
+  // to is the target node id.
+  string to = 2;
+
+  // kind is one of: "parent", "subtask", "child", "link", "remote",
+  // "description", "pull_request", "external".
+  string kind = 3;
+
+  // label is an optional human label (e.g. the link relation name,
+  // or a remote-link title). May be empty.
+  string label = 4;
+}
+
+// GetGraphResponse carries the discovered nodes and edges. Both are
+// sorted deterministically: nodes by id, edges by (from, to, kind, label).
+message GetGraphResponse {
+  repeated GraphNode nodes = 1;
+  repeated GraphEdge edges = 2;
 }

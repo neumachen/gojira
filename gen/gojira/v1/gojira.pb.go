@@ -2518,6 +2518,354 @@ func (x *TransitionIssueResponse) GetOk() bool {
 	return false
 }
 
+// GetGraphRequest controls a graph-only crawl: starting keys plus the
+// per-request crawl knobs the server honors via a per-RPC copy of its
+// configured Config (so concurrent RPCs do not race on s.cfg). Zero
+// values fall back to the server's configured defaults.
+type GetGraphRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// start_keys are the seed issue keys the crawl begins from. Required.
+	StartKeys []string `protobuf:"bytes,1,rep,name=start_keys,json=startKeys,proto3" json:"start_keys,omitempty"`
+	// depth_limit caps the crawl depth from each seed; 0 means unlimited.
+	DepthLimit int32 `protobuf:"varint,2,opt,name=depth_limit,json=depthLimit,proto3" json:"depth_limit,omitempty"`
+	// issue_cap caps the total number of issues fetched per call;
+	// 0 means use the server's default (500).
+	IssueCap int32 `protobuf:"varint,3,opt,name=issue_cap,json=issueCap,proto3" json:"issue_cap,omitempty"`
+	// time_cap_seconds caps wall-clock time for the call; 0 means unlimited.
+	TimeCapSeconds int32 `protobuf:"varint,4,opt,name=time_cap_seconds,json=timeCapSeconds,proto3" json:"time_cap_seconds,omitempty"`
+	// concurrency sets parallel Jira API requests; 0 means use the
+	// server's default (3).
+	Concurrency int32 `protobuf:"varint,5,opt,name=concurrency,proto3" json:"concurrency,omitempty"`
+	// include_children controls hierarchy-child discovery via JQL search.
+	IncludeChildren bool `protobuf:"varint,6,opt,name=include_children,json=includeChildren,proto3" json:"include_children,omitempty"`
+	// include_dev_status controls Dev Status enrichment (PRs, branches, …).
+	IncludeDevStatus bool `protobuf:"varint,7,opt,name=include_dev_status,json=includeDevStatus,proto3" json:"include_dev_status,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *GetGraphRequest) Reset() {
+	*x = GetGraphRequest{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetGraphRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetGraphRequest) ProtoMessage() {}
+
+func (x *GetGraphRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetGraphRequest.ProtoReflect.Descriptor instead.
+func (*GetGraphRequest) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *GetGraphRequest) GetStartKeys() []string {
+	if x != nil {
+		return x.StartKeys
+	}
+	return nil
+}
+
+func (x *GetGraphRequest) GetDepthLimit() int32 {
+	if x != nil {
+		return x.DepthLimit
+	}
+	return 0
+}
+
+func (x *GetGraphRequest) GetIssueCap() int32 {
+	if x != nil {
+		return x.IssueCap
+	}
+	return 0
+}
+
+func (x *GetGraphRequest) GetTimeCapSeconds() int32 {
+	if x != nil {
+		return x.TimeCapSeconds
+	}
+	return 0
+}
+
+func (x *GetGraphRequest) GetConcurrency() int32 {
+	if x != nil {
+		return x.Concurrency
+	}
+	return 0
+}
+
+func (x *GetGraphRequest) GetIncludeChildren() bool {
+	if x != nil {
+		return x.IncludeChildren
+	}
+	return false
+}
+
+func (x *GetGraphRequest) GetIncludeDevStatus() bool {
+	if x != nil {
+		return x.IncludeDevStatus
+	}
+	return false
+}
+
+// GraphNode mirrors internal/graph.Node. id is the canonical identifier:
+// for issues the UPPER issue key (e.g. "PROJ-1"); for github_pr the
+// "owner/repo#N" form when parseable, else the URL; for external the URL.
+type GraphNode struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// id is the unique node identifier.
+	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// kind is one of: "issue", "github_pr", "external".
+	Kind string `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
+	// label is the human-readable label used by the D2 diagram form.
+	Label string `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
+	// status is the Jira status name; ISSUE-ONLY, may be empty.
+	Status string `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
+	// type is the Jira issue type name; ISSUE-ONLY, may be empty.
+	Type string `protobuf:"bytes,5,opt,name=type,proto3" json:"type,omitempty"`
+	// assignee is the assignee display name; ISSUE-ONLY, may be empty.
+	Assignee string `protobuf:"bytes,6,opt,name=assignee,proto3" json:"assignee,omitempty"`
+	// url is the canonical URL for the node (SourceURL for issues; the
+	// PR or external URL otherwise).
+	Url string `protobuf:"bytes,7,opt,name=url,proto3" json:"url,omitempty"`
+	// fetched is true if this issue node was actually fetched in the
+	// crawl. ISSUE-ONLY; always false for github_pr and external nodes.
+	Fetched       bool `protobuf:"varint,8,opt,name=fetched,proto3" json:"fetched,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GraphNode) Reset() {
+	*x = GraphNode{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GraphNode) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GraphNode) ProtoMessage() {}
+
+func (x *GraphNode) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GraphNode.ProtoReflect.Descriptor instead.
+func (*GraphNode) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *GraphNode) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *GraphNode) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *GraphNode) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *GraphNode) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *GraphNode) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *GraphNode) GetAssignee() string {
+	if x != nil {
+		return x.Assignee
+	}
+	return ""
+}
+
+func (x *GraphNode) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *GraphNode) GetFetched() bool {
+	if x != nil {
+		return x.Fetched
+	}
+	return false
+}
+
+// GraphEdge mirrors internal/graph.Edge. The directed relationship
+// from -> to is labeled by kind plus an optional human label.
+type GraphEdge struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// from is the source node id.
+	From string `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
+	// to is the target node id.
+	To string `protobuf:"bytes,2,opt,name=to,proto3" json:"to,omitempty"`
+	// kind is one of: "parent", "subtask", "child", "link", "remote",
+	// "description", "pull_request", "external".
+	Kind string `protobuf:"bytes,3,opt,name=kind,proto3" json:"kind,omitempty"`
+	// label is an optional human label (e.g. the link relation name,
+	// or a remote-link title). May be empty.
+	Label         string `protobuf:"bytes,4,opt,name=label,proto3" json:"label,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GraphEdge) Reset() {
+	*x = GraphEdge{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GraphEdge) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GraphEdge) ProtoMessage() {}
+
+func (x *GraphEdge) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GraphEdge.ProtoReflect.Descriptor instead.
+func (*GraphEdge) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *GraphEdge) GetFrom() string {
+	if x != nil {
+		return x.From
+	}
+	return ""
+}
+
+func (x *GraphEdge) GetTo() string {
+	if x != nil {
+		return x.To
+	}
+	return ""
+}
+
+func (x *GraphEdge) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *GraphEdge) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+// GetGraphResponse carries the discovered nodes and edges. Both are
+// sorted deterministically: nodes by id, edges by (from, to, kind, label).
+type GetGraphResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Nodes         []*GraphNode           `protobuf:"bytes,1,rep,name=nodes,proto3" json:"nodes,omitempty"`
+	Edges         []*GraphEdge           `protobuf:"bytes,2,rep,name=edges,proto3" json:"edges,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetGraphResponse) Reset() {
+	*x = GetGraphResponse{}
+	mi := &file_gojira_v1_gojira_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetGraphResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetGraphResponse) ProtoMessage() {}
+
+func (x *GetGraphResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gojira_v1_gojira_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetGraphResponse.ProtoReflect.Descriptor instead.
+func (*GetGraphResponse) Descriptor() ([]byte, []int) {
+	return file_gojira_v1_gojira_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *GetGraphResponse) GetNodes() []*GraphNode {
+	if x != nil {
+		return x.Nodes
+	}
+	return nil
+}
+
+func (x *GetGraphResponse) GetEdges() []*GraphEdge {
+	if x != nil {
+		return x.Edges
+	}
+	return nil
+}
+
 var File_gojira_v1_gojira_proto protoreflect.FileDescriptor
 
 const file_gojira_v1_gojira_proto_rawDesc = "" +
@@ -2736,16 +3084,44 @@ const file_gojira_v1_gojira_proto_rawDesc = "" +
 	"\x12target_status_name\x18\x03 \x01(\tR\x10targetStatusName\x12!\n" +
 	"\fcomment_text\x18\x04 \x01(\tR\vcommentText\")\n" +
 	"\x17TransitionIssueResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok*\x7f\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"\x93\x02\n" +
+	"\x0fGetGraphRequest\x12\x1d\n" +
+	"\n" +
+	"start_keys\x18\x01 \x03(\tR\tstartKeys\x12\x1f\n" +
+	"\vdepth_limit\x18\x02 \x01(\x05R\n" +
+	"depthLimit\x12\x1b\n" +
+	"\tissue_cap\x18\x03 \x01(\x05R\bissueCap\x12(\n" +
+	"\x10time_cap_seconds\x18\x04 \x01(\x05R\x0etimeCapSeconds\x12 \n" +
+	"\vconcurrency\x18\x05 \x01(\x05R\vconcurrency\x12)\n" +
+	"\x10include_children\x18\x06 \x01(\bR\x0fincludeChildren\x12,\n" +
+	"\x12include_dev_status\x18\a \x01(\bR\x10includeDevStatus\"\xb9\x01\n" +
+	"\tGraphNode\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x14\n" +
+	"\x05label\x18\x03 \x01(\tR\x05label\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\x12\x12\n" +
+	"\x04type\x18\x05 \x01(\tR\x04type\x12\x1a\n" +
+	"\bassignee\x18\x06 \x01(\tR\bassignee\x12\x10\n" +
+	"\x03url\x18\a \x01(\tR\x03url\x12\x18\n" +
+	"\afetched\x18\b \x01(\bR\afetched\"Y\n" +
+	"\tGraphEdge\x12\x12\n" +
+	"\x04from\x18\x01 \x01(\tR\x04from\x12\x0e\n" +
+	"\x02to\x18\x02 \x01(\tR\x02to\x12\x12\n" +
+	"\x04kind\x18\x03 \x01(\tR\x04kind\x12\x14\n" +
+	"\x05label\x18\x04 \x01(\tR\x05label\"j\n" +
+	"\x10GetGraphResponse\x12*\n" +
+	"\x05nodes\x18\x01 \x03(\v2\x14.gojira.v1.GraphNodeR\x05nodes\x12*\n" +
+	"\x05edges\x18\x02 \x03(\v2\x14.gojira.v1.GraphEdgeR\x05edges*\x7f\n" +
 	"\fOutputFormat\x12\x1d\n" +
 	"\x19OUTPUT_FORMAT_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18OUTPUT_FORMAT_STRUCTURED\x10\x01\x12\x1a\n" +
 	"\x16OUTPUT_FORMAT_MARKDOWN\x10\x02\x12\x16\n" +
-	"\x12OUTPUT_FORMAT_JSON\x10\x032\xe8\x04\n" +
+	"\x12OUTPUT_FORMAT_JSON\x10\x032\xad\x05\n" +
 	"\x06Gojira\x12C\n" +
 	"\bClassify\x12\x1a.gojira.v1.ClassifyRequest\x1a\x1b.gojira.v1.ClassifyResponse\x12C\n" +
 	"\bGetIssue\x12\x1a.gojira.v1.GetIssueRequest\x1a\x1b.gojira.v1.GetIssueResponse\x129\n" +
-	"\x05Crawl\x12\x17.gojira.v1.CrawlRequest\x1a\x15.gojira.v1.CrawlEvent0\x01\x12L\n" +
+	"\x05Crawl\x12\x17.gojira.v1.CrawlRequest\x1a\x15.gojira.v1.CrawlEvent0\x01\x12C\n" +
+	"\bGetGraph\x12\x1a.gojira.v1.GetGraphRequest\x1a\x1b.gojira.v1.GetGraphResponse\x12L\n" +
 	"\vCreateIssue\x12\x1d.gojira.v1.CreateIssueRequest\x1a\x1e.gojira.v1.CreateIssueResponse\x12L\n" +
 	"\vUpdateIssue\x12\x1d.gojira.v1.UpdateIssueRequest\x1a\x1e.gojira.v1.UpdateIssueResponse\x12I\n" +
 	"\n" +
@@ -2768,7 +3144,7 @@ func file_gojira_v1_gojira_proto_rawDescGZIP() []byte {
 }
 
 var file_gojira_v1_gojira_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_gojira_v1_gojira_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
+var file_gojira_v1_gojira_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
 var file_gojira_v1_gojira_proto_goTypes = []any{
 	(OutputFormat)(0),               // 0: gojira.v1.OutputFormat
 	(CrawlEvent_Kind)(0),            // 1: gojira.v1.CrawlEvent.Kind
@@ -2801,21 +3177,25 @@ var file_gojira_v1_gojira_proto_goTypes = []any{
 	(*Transition)(nil),              // 28: gojira.v1.Transition
 	(*TransitionIssueRequest)(nil),  // 29: gojira.v1.TransitionIssueRequest
 	(*TransitionIssueResponse)(nil), // 30: gojira.v1.TransitionIssueResponse
-	nil,                             // 31: gojira.v1.Issue.CustomFieldsEntry
-	nil,                             // 32: gojira.v1.Summary.FailedKeysEntry
-	nil,                             // 33: gojira.v1.CreateIssueRequest.RawFieldsEntry
-	nil,                             // 34: gojira.v1.UpdateIssueRequest.RawFieldsEntry
-	(*timestamppb.Timestamp)(nil),   // 35: google.protobuf.Timestamp
+	(*GetGraphRequest)(nil),         // 31: gojira.v1.GetGraphRequest
+	(*GraphNode)(nil),               // 32: gojira.v1.GraphNode
+	(*GraphEdge)(nil),               // 33: gojira.v1.GraphEdge
+	(*GetGraphResponse)(nil),        // 34: gojira.v1.GetGraphResponse
+	nil,                             // 35: gojira.v1.Issue.CustomFieldsEntry
+	nil,                             // 36: gojira.v1.Summary.FailedKeysEntry
+	nil,                             // 37: gojira.v1.CreateIssueRequest.RawFieldsEntry
+	nil,                             // 38: gojira.v1.UpdateIssueRequest.RawFieldsEntry
+	(*timestamppb.Timestamp)(nil),   // 39: google.protobuf.Timestamp
 }
 var file_gojira_v1_gojira_proto_depIdxs = []int32{
 	0,  // 0: gojira.v1.GetIssueRequest.format:type_name -> gojira.v1.OutputFormat
 	6,  // 1: gojira.v1.GetIssueResponse.issue:type_name -> gojira.v1.Issue
-	35, // 2: gojira.v1.Issue.created:type_name -> google.protobuf.Timestamp
-	35, // 3: gojira.v1.Issue.updated:type_name -> google.protobuf.Timestamp
+	39, // 2: gojira.v1.Issue.created:type_name -> google.protobuf.Timestamp
+	39, // 3: gojira.v1.Issue.updated:type_name -> google.protobuf.Timestamp
 	7,  // 4: gojira.v1.Issue.subtasks:type_name -> gojira.v1.LinkedIssueRef
 	8,  // 5: gojira.v1.Issue.issue_links:type_name -> gojira.v1.IssueLinkRef
 	9,  // 6: gojira.v1.Issue.remote_links:type_name -> gojira.v1.RemoteLinkRef
-	31, // 7: gojira.v1.Issue.custom_fields:type_name -> gojira.v1.Issue.CustomFieldsEntry
+	35, // 7: gojira.v1.Issue.custom_fields:type_name -> gojira.v1.Issue.CustomFieldsEntry
 	16, // 8: gojira.v1.Issue.references:type_name -> gojira.v1.Reference
 	10, // 9: gojira.v1.Issue.dev_status:type_name -> gojira.v1.DevStatusData
 	7,  // 10: gojira.v1.IssueLinkRef.issue:type_name -> gojira.v1.LinkedIssueRef
@@ -2824,35 +3204,39 @@ var file_gojira_v1_gojira_proto_depIdxs = []int32{
 	13, // 13: gojira.v1.DevStatusData.commits:type_name -> gojira.v1.CommitRef
 	14, // 14: gojira.v1.DevStatusData.repositories:type_name -> gojira.v1.RepositoryRef
 	15, // 15: gojira.v1.DevStatusData.builds:type_name -> gojira.v1.BuildRef
-	35, // 16: gojira.v1.CommitRef.timestamp:type_name -> google.protobuf.Timestamp
+	39, // 16: gojira.v1.CommitRef.timestamp:type_name -> google.protobuf.Timestamp
 	1,  // 17: gojira.v1.CrawlEvent.kind:type_name -> gojira.v1.CrawlEvent.Kind
-	35, // 18: gojira.v1.CrawlEvent.timestamp:type_name -> google.protobuf.Timestamp
+	39, // 18: gojira.v1.CrawlEvent.timestamp:type_name -> google.protobuf.Timestamp
 	19, // 19: gojira.v1.CrawlEvent.summary:type_name -> gojira.v1.Summary
-	32, // 20: gojira.v1.Summary.failed_keys:type_name -> gojira.v1.Summary.FailedKeysEntry
-	33, // 21: gojira.v1.CreateIssueRequest.raw_fields:type_name -> gojira.v1.CreateIssueRequest.RawFieldsEntry
-	34, // 22: gojira.v1.UpdateIssueRequest.raw_fields:type_name -> gojira.v1.UpdateIssueRequest.RawFieldsEntry
+	36, // 20: gojira.v1.Summary.failed_keys:type_name -> gojira.v1.Summary.FailedKeysEntry
+	37, // 21: gojira.v1.CreateIssueRequest.raw_fields:type_name -> gojira.v1.CreateIssueRequest.RawFieldsEntry
+	38, // 22: gojira.v1.UpdateIssueRequest.raw_fields:type_name -> gojira.v1.UpdateIssueRequest.RawFieldsEntry
 	28, // 23: gojira.v1.ListTransitionsResponse.transitions:type_name -> gojira.v1.Transition
-	2,  // 24: gojira.v1.Gojira.Classify:input_type -> gojira.v1.ClassifyRequest
-	4,  // 25: gojira.v1.Gojira.GetIssue:input_type -> gojira.v1.GetIssueRequest
-	17, // 26: gojira.v1.Gojira.Crawl:input_type -> gojira.v1.CrawlRequest
-	20, // 27: gojira.v1.Gojira.CreateIssue:input_type -> gojira.v1.CreateIssueRequest
-	22, // 28: gojira.v1.Gojira.UpdateIssue:input_type -> gojira.v1.UpdateIssueRequest
-	24, // 29: gojira.v1.Gojira.AddComment:input_type -> gojira.v1.AddCommentRequest
-	26, // 30: gojira.v1.Gojira.ListTransitions:input_type -> gojira.v1.ListTransitionsRequest
-	29, // 31: gojira.v1.Gojira.TransitionIssue:input_type -> gojira.v1.TransitionIssueRequest
-	3,  // 32: gojira.v1.Gojira.Classify:output_type -> gojira.v1.ClassifyResponse
-	5,  // 33: gojira.v1.Gojira.GetIssue:output_type -> gojira.v1.GetIssueResponse
-	18, // 34: gojira.v1.Gojira.Crawl:output_type -> gojira.v1.CrawlEvent
-	21, // 35: gojira.v1.Gojira.CreateIssue:output_type -> gojira.v1.CreateIssueResponse
-	23, // 36: gojira.v1.Gojira.UpdateIssue:output_type -> gojira.v1.UpdateIssueResponse
-	25, // 37: gojira.v1.Gojira.AddComment:output_type -> gojira.v1.AddCommentResponse
-	27, // 38: gojira.v1.Gojira.ListTransitions:output_type -> gojira.v1.ListTransitionsResponse
-	30, // 39: gojira.v1.Gojira.TransitionIssue:output_type -> gojira.v1.TransitionIssueResponse
-	32, // [32:40] is the sub-list for method output_type
-	24, // [24:32] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	32, // 24: gojira.v1.GetGraphResponse.nodes:type_name -> gojira.v1.GraphNode
+	33, // 25: gojira.v1.GetGraphResponse.edges:type_name -> gojira.v1.GraphEdge
+	2,  // 26: gojira.v1.Gojira.Classify:input_type -> gojira.v1.ClassifyRequest
+	4,  // 27: gojira.v1.Gojira.GetIssue:input_type -> gojira.v1.GetIssueRequest
+	17, // 28: gojira.v1.Gojira.Crawl:input_type -> gojira.v1.CrawlRequest
+	31, // 29: gojira.v1.Gojira.GetGraph:input_type -> gojira.v1.GetGraphRequest
+	20, // 30: gojira.v1.Gojira.CreateIssue:input_type -> gojira.v1.CreateIssueRequest
+	22, // 31: gojira.v1.Gojira.UpdateIssue:input_type -> gojira.v1.UpdateIssueRequest
+	24, // 32: gojira.v1.Gojira.AddComment:input_type -> gojira.v1.AddCommentRequest
+	26, // 33: gojira.v1.Gojira.ListTransitions:input_type -> gojira.v1.ListTransitionsRequest
+	29, // 34: gojira.v1.Gojira.TransitionIssue:input_type -> gojira.v1.TransitionIssueRequest
+	3,  // 35: gojira.v1.Gojira.Classify:output_type -> gojira.v1.ClassifyResponse
+	5,  // 36: gojira.v1.Gojira.GetIssue:output_type -> gojira.v1.GetIssueResponse
+	18, // 37: gojira.v1.Gojira.Crawl:output_type -> gojira.v1.CrawlEvent
+	34, // 38: gojira.v1.Gojira.GetGraph:output_type -> gojira.v1.GetGraphResponse
+	21, // 39: gojira.v1.Gojira.CreateIssue:output_type -> gojira.v1.CreateIssueResponse
+	23, // 40: gojira.v1.Gojira.UpdateIssue:output_type -> gojira.v1.UpdateIssueResponse
+	25, // 41: gojira.v1.Gojira.AddComment:output_type -> gojira.v1.AddCommentResponse
+	27, // 42: gojira.v1.Gojira.ListTransitions:output_type -> gojira.v1.ListTransitionsResponse
+	30, // 43: gojira.v1.Gojira.TransitionIssue:output_type -> gojira.v1.TransitionIssueResponse
+	35, // [35:44] is the sub-list for method output_type
+	26, // [26:35] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_gojira_v1_gojira_proto_init() }
@@ -2874,7 +3258,7 @@ func file_gojira_v1_gojira_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gojira_v1_gojira_proto_rawDesc), len(file_gojira_v1_gojira_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   33,
+			NumMessages:   37,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

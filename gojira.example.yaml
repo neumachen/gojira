@@ -10,6 +10,9 @@
 # Or point at it explicitly with `--config <path>` (highest-precedence
 # discovery candidate) or the GOJIRA_CONFIG_FILE env var.
 #
+# `gojira init` generates a file with this same shape at the XDG config
+# location ($XDG_CONFIG_HOME/gojira/config.yaml or ~/.config/gojira/config.yaml).
+#
 # Cascade precedence (low → high):
 #   embedded defaults < this YAML file < GOJIRA_ environment variables < CLI flags
 #

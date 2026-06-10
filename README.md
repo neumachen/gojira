@@ -36,8 +36,12 @@ Compose" below.
 # 1. Generate a Jira Cloud API token at:
 #      https://id.atlassian.com/manage-profile/security/api-tokens
 
-# 2. Configure credentials. The CLI reads env vars; either export
-#    them or use a .env file.
+# 2. Configure credentials. The simplest path is `gojira init`, which
+#    writes a 0600 config file at ~/.config/gojira/config.yaml — see
+#    "First run: gojira init" below. The CLI also reads env vars
+#    directly: either export them or use a .env file.
+gojira init   # interactive; or pass --site/--user/--token as flags
+# alternative: env-only configuration
 cp .env.example .env
 $EDITOR .env   # fill in GOJIRA_SITE, GOJIRA_USER, GOJIRA_TOKEN
 
@@ -109,6 +113,51 @@ flag overrides the env var when both are set.
 | `--log-level`                 | `GOJIRA_LOG_LEVEL`            | `info`        | One of: `error`, `warn`, `info`, `debug`. |
 | `--log-format`                | `GOJIRA_LOG_FORMAT`           | `text`        | One of: `text` (human-readable), `json` (one JSON object per line). |
 | `--config`                    | `GOJIRA_CONFIG_FILE`          | (discovered)  | Path to a YAML config file (see [Configuration](#configuration)). |
+
+## First run: `gojira init`
+
+Every Jira-touching command (`crawl`, `serve`, `create`, `update`,
+`comment`, `transitions`, `transition`) requires some form of
+configuration before it will contact Jira. The simplest way to provide
+it is the `gojira init` subcommand, which scaffolds a config file at
+the XDG global path (`$XDG_CONFIG_HOME/gojira/config.yaml` or, when
+`XDG_CONFIG_HOME` is unset, `~/.config/gojira/config.yaml`) with
+`0600` permissions because it contains your Jira API token.
+
+```sh
+gojira init \
+  --site https://your.atlassian.net \
+  --user you@example.com \
+  --token <api-token>
+```
+
+Omitted required values are prompted for interactively. The token is
+read **without echo** on a real terminal (via `golang.org/x/term`) and
+falls back to a warned-echo read on non-terminals (CI pipes, etc.).
+The `--output-dir` and `--server-address` flags accept the documented
+defaults (`./out` and `127.0.0.1:50051`) when omitted.
+
+`gojira init` refuses to overwrite an existing config file unless you
+pass `--force`. The written YAML has the same shape as
+[`gojira.example.yaml`](./gojira.example.yaml) and is consumed by the
+same loader the cascade below documents.
+
+### How a command finds its configuration
+
+A guarded command will run iff **any one** of the following is true:
+
+1. A config file is discovered through the cascade (see
+   [Config-file discovery](#config-file-discovery) below): an explicit
+   `--config` value, `$GOJIRA_CONFIG_FILE`, `./gojira.yaml`, or the XDG
+   global config file.
+2. The `--config <path>` flag was passed.
+3. The `--site`, `--user`, and `--token` flags were ALL passed.
+4. The required env vars are present: `GOJIRA_CONFIG_FILE`, or all
+   three of `GOJIRA_SITE`, `GOJIRA_USER`, and `GOJIRA_TOKEN`.
+
+If none of (1)-(4) hold, the command exits with a clear error pointing
+at `gojira init`. The `init`, `help`, and `--version` invocations are
+exempt from this guard so they remain usable from a no-config state.
 
 ## Configuration
 

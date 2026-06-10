@@ -22,6 +22,7 @@ const (
 	Gojira_Classify_FullMethodName        = "/gojira.v1.Gojira/Classify"
 	Gojira_GetIssue_FullMethodName        = "/gojira.v1.Gojira/GetIssue"
 	Gojira_Crawl_FullMethodName           = "/gojira.v1.Gojira/Crawl"
+	Gojira_GetGraph_FullMethodName        = "/gojira.v1.Gojira/GetGraph"
 	Gojira_CreateIssue_FullMethodName     = "/gojira.v1.Gojira/CreateIssue"
 	Gojira_UpdateIssue_FullMethodName     = "/gojira.v1.Gojira/UpdateIssue"
 	Gojira_AddComment_FullMethodName      = "/gojira.v1.Gojira/AddComment"
@@ -51,6 +52,10 @@ type GojiraClient interface {
 	// to the caller. Crawl content is persisted server-side via FSStore;
 	// per-issue content over the wire is available on demand via GetIssue.
 	Crawl(ctx context.Context, in *CrawlRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[CrawlEvent], error)
+	// GetGraph runs a recursive crawl IN MEMORY (no files written) and
+	// returns the discovered issue graph as a {nodes, edges} pair. It
+	// mirrors the graph.json schema produced by the CLI's --graph flag.
+	GetGraph(ctx context.Context, in *GetGraphRequest, opts ...grpc.CallOption) (*GetGraphResponse, error)
 	// CreateIssue creates a new Jira issue and returns its key/id/self URL.
 	// When dry_run is set the server returns the request body it WOULD send
 	// (in dry_run_body) without contacting Jira.
@@ -116,6 +121,16 @@ func (c *gojiraClient) Crawl(ctx context.Context, in *CrawlRequest, opts ...grpc
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Gojira_CrawlClient = grpc.ServerStreamingClient[CrawlEvent]
+
+func (c *gojiraClient) GetGraph(ctx context.Context, in *GetGraphRequest, opts ...grpc.CallOption) (*GetGraphResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetGraphResponse)
+	err := c.cc.Invoke(ctx, Gojira_GetGraph_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
 
 func (c *gojiraClient) CreateIssue(ctx context.Context, in *CreateIssueRequest, opts ...grpc.CallOption) (*CreateIssueResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -189,6 +204,10 @@ type GojiraServer interface {
 	// to the caller. Crawl content is persisted server-side via FSStore;
 	// per-issue content over the wire is available on demand via GetIssue.
 	Crawl(*CrawlRequest, grpc.ServerStreamingServer[CrawlEvent]) error
+	// GetGraph runs a recursive crawl IN MEMORY (no files written) and
+	// returns the discovered issue graph as a {nodes, edges} pair. It
+	// mirrors the graph.json schema produced by the CLI's --graph flag.
+	GetGraph(context.Context, *GetGraphRequest) (*GetGraphResponse, error)
 	// CreateIssue creates a new Jira issue and returns its key/id/self URL.
 	// When dry_run is set the server returns the request body it WOULD send
 	// (in dry_run_body) without contacting Jira.
@@ -224,6 +243,9 @@ func (UnimplementedGojiraServer) GetIssue(context.Context, *GetIssueRequest) (*G
 }
 func (UnimplementedGojiraServer) Crawl(*CrawlRequest, grpc.ServerStreamingServer[CrawlEvent]) error {
 	return status.Errorf(codes.Unimplemented, "method Crawl not implemented")
+}
+func (UnimplementedGojiraServer) GetGraph(context.Context, *GetGraphRequest) (*GetGraphResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetGraph not implemented")
 }
 func (UnimplementedGojiraServer) CreateIssue(context.Context, *CreateIssueRequest) (*CreateIssueResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateIssue not implemented")
@@ -307,6 +329,24 @@ func _Gojira_Crawl_Handler(srv interface{}, stream grpc.ServerStream) error {
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type Gojira_CrawlServer = grpc.ServerStreamingServer[CrawlEvent]
+
+func _Gojira_GetGraph_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetGraphRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GojiraServer).GetGraph(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Gojira_GetGraph_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GojiraServer).GetGraph(ctx, req.(*GetGraphRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
 
 func _Gojira_CreateIssue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateIssueRequest)
@@ -412,6 +452,10 @@ var Gojira_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetIssue",
 			Handler:    _Gojira_GetIssue_Handler,
+		},
+		{
+			MethodName: "GetGraph",
+			Handler:    _Gojira_GetGraph_Handler,
 		},
 		{
 			MethodName: "CreateIssue",

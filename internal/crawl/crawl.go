@@ -249,10 +249,16 @@ type crawler struct {
 	phaseDurations map[string]time.Duration
 
 	// graph collects nodes and edges describing the crawled issue
-	// graph. nil when cfg.EmitGraph is false. Accessed only while
-	// holding c.mu (the collector itself is not safe for concurrent
-	// use).
+	// graph. nil when cfg.EmitGraph is false and forceGraph is also
+	// false. Accessed only while holding c.mu (the collector itself
+	// is not safe for concurrent use).
 	graph *graph.Collector
+
+	// forceGraph forces the graph collector ON regardless of
+	// cfg.EmitGraph, AND suppresses the post-loop disk write. Set
+	// only by [CrawlGraphWithEnrichers]; callers consume the
+	// in-memory [graph.Model] via the returned value instead.
+	forceGraph bool
 }
 
 // noopLogger returns a [*slog.Logger] whose handler always returns false
@@ -1085,6 +1091,52 @@ func CrawlWithEnrichers(
 	store output.Store,
 	logger *slog.Logger,
 ) (Summary, error) {
+	sum, _, err := crawlImpl(ctx, cfg, startKeys, fetcher, sink, hier, devStatus, store, logger, false)
+	return sum, err
+}
+
+// CrawlGraphWithEnrichers is the in-memory graph variant of
+// [CrawlWithEnrichers]. It runs the same crawl with graph collection
+// FORCED ON (independent of cfg.EmitGraph) and SUPPRESSES the
+// post-loop disk write of graph.json / graph.d2, returning the
+// collected [graph.Model] alongside the [Summary] instead.
+//
+// All other observable behavior — events, summary, exit-code mapping
+// of errors — is byte-identical to [CrawlWithEnrichers]. This is the
+// entry point the gRPC GetGraph handler uses and is also useful to
+// library callers who want the graph in memory without touching the
+// filesystem.
+func CrawlGraphWithEnrichers(
+	ctx context.Context,
+	cfg config.Config,
+	startKeys []string,
+	fetcher fetch.Fetcher,
+	sink events.Sink,
+	hier ChildDiscoverer,
+	devStatus DevStatusEnricher,
+	store output.Store,
+	logger *slog.Logger,
+) (Summary, graph.Model, error) {
+	return crawlImpl(ctx, cfg, startKeys, fetcher, sink, hier, devStatus, store, logger, true)
+}
+
+// crawlImpl is the shared implementation behind [CrawlWithEnrichers]
+// and [CrawlGraphWithEnrichers]. forceGraph=true forces the
+// in-memory graph collector ON regardless of cfg.EmitGraph and
+// suppresses the disk write; the returned graph.Model is the
+// caller-visible artifact in that mode (zero-valued otherwise).
+func crawlImpl(
+	ctx context.Context,
+	cfg config.Config,
+	startKeys []string,
+	fetcher fetch.Fetcher,
+	sink events.Sink,
+	hier ChildDiscoverer,
+	devStatus DevStatusEnricher,
+	store output.Store,
+	logger *slog.Logger,
+	forceGraph bool,
+) (Summary, graph.Model, error) {
 	// When the caller passes a nil logger, default to a no-op handler so the
 	// rest of the orchestrator can emit unconditionally. This preserves the
 	// historical no-output behavior for callers that have not adopted the
@@ -1135,10 +1187,14 @@ func CrawlWithEnrichers(
 		phaseCounts:    make(map[string]int),
 		phaseDurations: make(map[string]time.Duration),
 	}
-	// Opt-in graph collector. Constructing inside CrawlWithEnrichers
-	// keeps the exported signature unchanged: the feature is driven
-	// entirely by cfg.EmitGraph through the standard config cascade.
-	if cfg.EmitGraph {
+	// Opt-in graph collector. Constructing here keeps the exported
+	// CrawlWithEnrichers signature unchanged: the disk-export feature
+	// is driven entirely by cfg.EmitGraph through the standard config
+	// cascade. The in-memory variant [CrawlGraphWithEnrichers] passes
+	// forceGraph=true so the collector is constructed regardless of
+	// cfg.EmitGraph (and the disk write below is suppressed).
+	c.forceGraph = forceGraph
+	if cfg.EmitGraph || forceGraph {
 		c.graph = graph.NewCollector()
 	}
 	// Tag every record emitted by the orchestrator with
@@ -1276,7 +1332,11 @@ func CrawlWithEnrichers(
 	// Best-effort graph export. A failure to write either file
 	// degrades to a warn-level log line; the Markdown output is the
 	// primary artifact and the crawl exit code must not change.
-	if c.graph != nil {
+	//
+	// The disk write is gated on cfg.EmitGraph (NOT c.forceGraph):
+	// [CrawlGraphWithEnrichers] forces collection on so the model
+	// can be returned in memory, but it never wants files written.
+	if c.graph != nil && cfg.EmitGraph {
 		writeGraphFiles(crawlCtx, c.logger, c.graph.Model(), cfg.OutputDir)
 	}
 
@@ -1308,7 +1368,15 @@ func CrawlWithEnrichers(
 		},
 	})
 
-	return c.summary, c.abortErr
+	// In the in-memory variant the caller consumes the graph via the
+	// returned [graph.Model]; in the file variant we return the zero
+	// model so the second return is meaningless to callers of the
+	// thin wrapper [CrawlWithEnrichers].
+	var model graph.Model
+	if c.graph != nil && c.forceGraph {
+		model = c.graph.Model()
+	}
+	return c.summary, model, c.abortErr
 }
 
 // hasAnyDevStatusEntity reports whether d carries at least one entity

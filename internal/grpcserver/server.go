@@ -39,6 +39,13 @@ type Server struct {
 	// gojira.Crawl. Overridable in tests.
 	crawlFn func(ctx context.Context, cfg gojira.Config, startKeys []string, sink gojira.Sink) (gojira.Summary, error)
 
+	// crawlGraphFn runs an in-memory graph-only crawl and returns
+	// the discovered [gojira.GraphModel] alongside the Summary,
+	// without writing graph.json / graph.d2 to disk. Defaults to a
+	// closure over gojira.CrawlGraph. Overridable in tests via
+	// [WithCrawlGraphFunc].
+	crawlGraphFn func(ctx context.Context, cfg gojira.Config, startKeys []string, sink gojira.Sink) (gojira.Summary, gojira.GraphModel, error)
+
 	// Phase-2 write seams. Each defaults in [NewServer] to a closure
 	// over the matching gojira facade function and is overridable via
 	// the With*Func [Option] constructors below. Keeping them on the
@@ -78,6 +85,14 @@ func WithGetIssueFunc(fn func(ctx context.Context, cfg gojira.Config, key string
 // without performing real fetches.
 func WithCrawlFunc(fn func(ctx context.Context, cfg gojira.Config, startKeys []string, sink gojira.Sink) (gojira.Summary, error)) Option {
 	return func(s *Server) { s.crawlFn = fn }
+}
+
+// WithCrawlGraphFunc overrides the function used by [Server.GetGraph]
+// to run an in-memory graph-only crawl. The default closes over
+// [gojira.CrawlGraph]; tests inject a fake that returns a fixed
+// [gojira.GraphModel] without touching the network.
+func WithCrawlGraphFunc(fn func(ctx context.Context, cfg gojira.Config, startKeys []string, sink gojira.Sink) (gojira.Summary, gojira.GraphModel, error)) Option {
+	return func(s *Server) { s.crawlGraphFn = fn }
 }
 
 // WithCreateIssueFunc overrides the function used by [Server.CreateIssue].
@@ -126,6 +141,9 @@ func NewServer(cfg gojira.Config, opts ...Option) *Server {
 		},
 		crawlFn: func(ctx context.Context, cfg gojira.Config, startKeys []string, sink gojira.Sink) (gojira.Summary, error) {
 			return gojira.Crawl(ctx, cfg, startKeys, sink)
+		},
+		crawlGraphFn: func(ctx context.Context, cfg gojira.Config, startKeys []string, sink gojira.Sink) (gojira.Summary, gojira.GraphModel, error) {
+			return gojira.CrawlGraph(ctx, cfg, startKeys, sink)
 		},
 		createIssueFn: func(ctx context.Context, cfg gojira.Config, project, issueType string, opts ...client.CreateOption) (client.CreatedIssue, error) {
 			return gojira.CreateIssue(ctx, cfg, project, issueType, opts...)
@@ -255,6 +273,96 @@ func (s *Server) Crawl(req *gojirav1.CrawlRequest, stream grpc.ServerStreamingSe
 		return toStatusError(err)
 	}
 	return nil
+}
+
+// GetGraph runs an in-memory graph-only crawl and returns the
+// discovered issue graph as {nodes, edges}. Mirrors the graph.json
+// schema produced by the CLI's --graph flag — same node Kinds
+// ("issue", "github_pr", "external") and edge Kinds
+// ("parent", "subtask", "child", "link", "remote", "description",
+// "pull_request", "external").
+//
+// Per-request crawl knobs (depth_limit, issue_cap, time_cap_seconds,
+// concurrency, include_children, include_dev_status) are applied via
+// a per-RPC COPY of s.cfg so concurrent GetGraph calls do not race
+// on shared mutable state. Zero values fall through to the server's
+// configured defaults.
+//
+// Errors from the underlying crawl flow through [toStatusError]; an
+// empty start_keys list returns codes.InvalidArgument.
+func (s *Server) GetGraph(ctx context.Context, req *gojirav1.GetGraphRequest) (*gojirav1.GetGraphResponse, error) {
+	keys := req.GetStartKeys()
+	if len(keys) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "at least one start key is required")
+	}
+
+	// Per-RPC cfg copy: apply per-request knob overrides without
+	// mutating s.cfg (which is read by every concurrent handler).
+	// Zero values mean "use server default", so we forward them
+	// only when non-zero. Bool fields are simply applied as-is —
+	// proto3 cannot distinguish "unset" from "false", and the
+	// underlying Crawl handler does not honor per-request bool
+	// overrides today either; documenting both forms in the proto
+	// keeps the door open for a future "as-is" semantic without a
+	// breaking change.
+	cfg := s.cfg
+	if v := req.GetDepthLimit(); v != 0 {
+		cfg.DepthLimit = int(v)
+	}
+	if v := req.GetIssueCap(); v != 0 {
+		cfg.IssueCap = int(v)
+	}
+	if v := req.GetTimeCapSeconds(); v != 0 {
+		cfg.TimeCapSeconds = int(v)
+	}
+	if v := req.GetConcurrency(); v != 0 {
+		cfg.Concurrency = int(v)
+	}
+	cfg.IncludeChildren = req.GetIncludeChildren()
+	cfg.IncludeDevStatus = req.GetIncludeDevStatus()
+
+	// GetGraph is unary; events are not streamed back to the caller.
+	// The underlying crawl still emits to a sink, so we pass a
+	// discarding sink. gojira.CrawlGraph also accepts nil and
+	// substitutes events.NoopSink internally; we pass nil so the
+	// fake injected by tests sees the same shape callers do.
+	sum, model, err := s.crawlGraphFn(ctx, cfg, keys, nil)
+	if err != nil {
+		return nil, toStatusError(err)
+	}
+	_ = sum // GetGraph does not surface the summary today
+
+	return graphModelToProto(model), nil
+}
+
+// graphModelToProto converts a [gojira.GraphModel] into the wire
+// [gojirav1.GetGraphResponse]. The field mapping is 1:1 and the node
+// Kinds / edge Kinds are forwarded verbatim as the strings the
+// graph package emits, matching the graph.json schema.
+func graphModelToProto(m gojira.GraphModel) *gojirav1.GetGraphResponse {
+	nodes := make([]*gojirav1.GraphNode, 0, len(m.Nodes))
+	for _, n := range m.Nodes {
+		nodes = append(nodes, &gojirav1.GraphNode{
+			Id:       n.ID,
+			Kind:     string(n.Kind),
+			Label:    n.Label,
+			Status:   n.Status,
+			Type:     n.Type,
+			Assignee: n.Assignee,
+			Url:      n.URL,
+			Fetched:  n.Fetched,
+		})
+	}
+	edges := make([]*gojirav1.GraphEdge, 0, len(m.Edges))
+	for _, e := range m.Edges {
+		edges = append(edges, &gojirav1.GraphEdge{
+			From:  e.From,
+			To:    e.To,
+			Kind:  string(e.Kind),
+			Label: e.Label,
+		})
+	}
+	return &gojirav1.GetGraphResponse{Nodes: nodes, Edges: edges}
 }
 
 // Compile-time assertion that *Server satisfies the GojiraServer interface.

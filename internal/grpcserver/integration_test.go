@@ -606,3 +606,60 @@ func TestIntegration_Write_ErrorMapping(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// GetGraph — round-trips a fake graph model through real gRPC machinery
+// ---------------------------------------------------------------------------
+
+func TestIntegration_GetGraph_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	srv := grpcserver.NewServer(
+		integrationCfg(t),
+		grpcserver.WithCrawlGraphFunc(func(_ context.Context, _ gojira.Config, startKeys []string, _ gojira.Sink) (gojira.Summary, gojira.GraphModel, error) {
+			if len(startKeys) != 1 || startKeys[0] != "EXAMPLE-1" {
+				t.Errorf("startKeys: got %v, want [EXAMPLE-1]", startKeys)
+			}
+			return gojira.Summary{Fetched: 2}, gojira.GraphModel{
+				Nodes: []gojira.GraphNode{
+					{ID: "EXAMPLE-1", Kind: "issue", Label: "EXAMPLE-1: a", Fetched: true},
+					{ID: "EXAMPLE-2", Kind: "issue", Label: "EXAMPLE-2: b", Fetched: true},
+					{ID: "acme/widget#7", Kind: "github_pr", Label: "acme/widget#7",
+						URL: "https://github.com/acme/widget/pull/7"},
+				},
+				Edges: []gojira.GraphEdge{
+					{From: "EXAMPLE-1", To: "EXAMPLE-2", Kind: "link", Label: "blocks"},
+					{From: "EXAMPLE-1", To: "acme/widget#7", Kind: "pull_request"},
+				},
+			}, nil
+		}),
+	)
+	client := startBufconnServer(t, srv)
+
+	resp, err := client.GetGraph(context.Background(), &gojirav1.GetGraphRequest{
+		StartKeys: []string{"EXAMPLE-1"},
+	})
+	if err != nil {
+		t.Fatalf("GetGraph RPC: %v", err)
+	}
+
+	if got, want := len(resp.GetNodes()), 3; got != want {
+		t.Fatalf("node count: got %d, want %d", got, want)
+	}
+	if got, want := len(resp.GetEdges()), 2; got != want {
+		t.Fatalf("edge count: got %d, want %d", got, want)
+	}
+
+	// Spot-check that the kind strings are forwarded verbatim and the
+	// PR node kept its non-default shape.
+	kindByID := map[string]string{}
+	for _, n := range resp.GetNodes() {
+		kindByID[n.GetId()] = n.GetKind()
+	}
+	if kindByID["EXAMPLE-1"] != "issue" {
+		t.Errorf("EXAMPLE-1 kind: got %q", kindByID["EXAMPLE-1"])
+	}
+	if kindByID["acme/widget#7"] != "github_pr" {
+		t.Errorf("PR kind: got %q", kindByID["acme/widget#7"])
+	}
+}

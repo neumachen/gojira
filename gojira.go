@@ -52,6 +52,7 @@ import (
 	"github.com/neumachen/gojira/internal/events"
 	"github.com/neumachen/gojira/internal/extract"
 	"github.com/neumachen/gojira/internal/fetch"
+	"github.com/neumachen/gojira/internal/graph"
 	"github.com/neumachen/gojira/internal/hierarchy"
 	"github.com/neumachen/gojira/internal/output"
 	"github.com/neumachen/gojira/internal/parse"
@@ -87,6 +88,21 @@ type Sink = events.Sink
 // Event is a single observable occurrence emitted by the library.
 // It is an alias for the internal events.Event type.
 type Event = events.Event
+
+// GraphModel is the in-memory issue graph produced by [CrawlGraph].
+// It is a true alias of [graph.Model] so callers can pass values
+// across the package boundary without conversion.
+type GraphModel = graph.Model
+
+// GraphNode is a single node in a [GraphModel]; one of three Kinds:
+// "issue", "github_pr", or "external". Issue-only fields (Status,
+// Type, Assignee, URL) are zero-valued for non-issue nodes.
+type GraphNode = graph.Node
+
+// GraphEdge is a directed relationship between two [GraphNode]s.
+// Edge Kinds are: parent, subtask, child, link, remote, description,
+// pull_request, external.
+type GraphEdge = graph.Edge
 
 // ---------------------------------------------------------------------------
 // Event kind constants — re-exported so callers can switch on them without
@@ -543,6 +559,36 @@ func CrawlWithLogger(ctx context.Context, cfg Config, startKeys []string, sink S
 	// service front-end) can be injected at the crawl layer.
 	store := output.NewFSStore(cfg.OutputDir, cfg.Refetch)
 	return crawl.CrawlWithEnrichers(ctx, cfg, startKeys, f, sink, hier, prs, store, logger)
+}
+
+// CrawlGraph runs a recursive crawl exactly like [Crawl] and returns
+// the collected issue graph IN MEMORY as a [GraphModel], without ever
+// writing graph.json or graph.d2 to disk. This is the entry point the
+// gRPC GetGraph handler uses; it is also useful to library callers
+// who want the graph programmatically.
+//
+// Graph collection is FORCED ON regardless of cfg.EmitGraph (the
+// EmitGraph flag controls the disk-export side of the feature, which
+// CrawlGraph deliberately bypasses). Per-issue Markdown is still
+// produced through the normal output.Store when cfg.OutputDir is
+// configured — only the graph files are suppressed.
+//
+// The returned [Summary] is identical to what [Crawl] would produce
+// for the same inputs. Errors propagate unchanged through the
+// existing sentinel surface ([ErrUnauthorized], [ErrNotFound], etc.).
+func CrawlGraph(ctx context.Context, cfg Config, startKeys []string, sink Sink) (Summary, GraphModel, error) {
+	if sink == nil {
+		sink = events.NoopSink{}
+	}
+	c, err := client.New(cfg)
+	if err != nil {
+		return Summary{}, GraphModel{}, errext.Errorf("gojira: build client: %w", err)
+	}
+	f := fetch.New(c)
+	hier := hierarchy.New(c, cfg)
+	prs := devstatus.New(c, cfg)
+	store := output.NewFSStore(cfg.OutputDir, cfg.Refetch)
+	return crawl.CrawlGraphWithEnrichers(ctx, cfg, startKeys, f, sink, hier, prs, store, nil)
 }
 
 // ---------------------------------------------------------------------------

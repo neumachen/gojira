@@ -648,6 +648,8 @@ func configToKV(cfg gojira.Config) map[string]string {
 		"GOJIRA_DEV_STATUS_DATA_TYPES":     strings.Join(cfg.DevStatusDataTypes, ","),
 		"GOJIRA_RENDER_NULL_CUSTOM_FIELDS": bool01(cfg.RenderNullCustomFields),
 		"GOJIRA_EMIT_GRAPH":                bool01(cfg.EmitGraph),
+		"GOJIRA_MCP_MODE":                  cfg.MCPMode,
+		"GOJIRA_MCP_ALLOW_WRITES":          bool01(cfg.MCPAllowWrites),
 	}
 }
 

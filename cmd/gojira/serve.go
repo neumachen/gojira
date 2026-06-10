@@ -114,6 +114,10 @@ func runServe(ctx context.Context, cmd *cli.Command, env map[string]string, sign
 		stderr = os.Stderr
 	}
 
+	if err := requireConfig(cmd, env); err != nil {
+		return err
+	}
+
 	cfg, err := loadServeConfig(cmd, env, stderr)
 	if err != nil {
 		return err

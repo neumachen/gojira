@@ -1,9 +1,9 @@
 // White-box tests for the Phase-2 write-operation gRPC handlers
 // (CreateIssue, UpdateIssue, AddComment, ListTransitions,
-// TransitionIssue). They live in package grpcserver so they can
+// TransitionIssue). They live in package grpc so they can
 // overwrite the unexported function-field seams with in-process fakes,
 // driving the real handler code without any network calls.
-package grpcserver
+package grpc
 
 import (
 	"context"

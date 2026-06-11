@@ -1,8 +1,8 @@
-// White-box tests for the gRPC handlers. They live in `package grpcserver`
+// White-box tests for the gRPC handlers. They live in `package grpc`
 // so they can overwrite the unexported function-field seams getIssueFn
 // and crawlFn with in-process fakes, exercising the full handler path
 // without any network or live Jira.
-package grpcserver
+package grpc
 
 import (
 	"context"

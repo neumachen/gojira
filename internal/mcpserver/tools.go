@@ -256,7 +256,7 @@ func errorResult(err error) *mcp.CallToolResult {
 
 // classifyError prefixes the sentinel category onto the error
 // message so the host's LLM can route on it without parsing.
-// Mapping mirrors toStatusError in internal/grpcserver but stays
+// Mapping mirrors toStatusError in internal/grpc but stays
 // SDK-side (the gRPC bridge surfaces server-side status errors
 // directly; we still want a uniform classification on the MCP
 // boundary).

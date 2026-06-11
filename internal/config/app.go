@@ -118,5 +118,6 @@ func (a App) ToConfig() Config {
 		EmitGraph:              a.Crawl.EmitGraph,
 		MCPMode:                a.MCP.Mode,
 		MCPAllowWrites:         a.MCP.AllowWrites,
+		ServerAddress:          a.Server.EffectiveAddress(""),
 	}
 }

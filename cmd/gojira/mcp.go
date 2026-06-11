@@ -82,14 +82,12 @@ func runMCP(ctx context.Context, cmd *cli.Command, env map[string]string, signal
 
 	// (d) Resolve the gRPC bridge target only when in bridge mode.
 	// In self mode an unused server address would be misleading on
-	// the startup line.
+	// the startup line. The config cascade owns the default
+	// (127.0.0.1:50051) and the GOJIRA_SERVER_ADDRESS / --address
+	// overrides, so cfg.ServerAddress is always populated here.
 	var serverAddr string
 	if mode == mcpserver.ModeBridge {
-		var rerr error
-		serverAddr, rerr = resolveServerAddress(cmd, env, stderr)
-		if rerr != nil {
-			return rerr
-		}
+		serverAddr = cfg.ServerAddress
 	}
 
 	// (e) Build the backend. For bridge mode NewBridgeBackend's

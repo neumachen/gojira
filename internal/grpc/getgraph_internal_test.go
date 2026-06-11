@@ -1,7 +1,7 @@
 // White-box tests for the GetGraph handler. They live in
-// `package grpcserver` so they can install fakes via
+// `package grpc` so they can install fakes via
 // [WithCrawlGraphFunc] without exercising any network or live Jira.
-package grpcserver
+package grpc
 
 import (
 	"context"

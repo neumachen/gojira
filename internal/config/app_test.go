@@ -92,6 +92,7 @@ func TestApp_ToConfig_DefaultsRoundTrip(t *testing.T) {
 	assert.False(t, got.EmitGraph, "EmitGraph")
 	assert.Equal(t, "", got.MCPMode, "MCPMode (no embedded default by design)")
 	assert.False(t, got.MCPAllowWrites, "MCPAllowWrites")
+	assert.Equal(t, "127.0.0.1:50051", got.ServerAddress, "ServerAddress (loopback default)")
 
 	// Log block.
 	assert.Equal(t, "info", got.LogLevel, "LogLevel")
@@ -130,6 +131,7 @@ func TestApp_ToConfig_FullyPopulated(t *testing.T) {
 		},
 		Output: OutputSettings{Dir: "/tmp/jira-mirror"},
 		Log:    LogSettings{Level: "debug", Format: "json"},
+		Server: ServerSettings{Address: "0.0.0.0:9090"},
 		MCP:    MCPSettings{Mode: "self", AllowWrites: true},
 	}
 
@@ -156,6 +158,7 @@ func TestApp_ToConfig_FullyPopulated(t *testing.T) {
 		EmitGraph:              true,
 		MCPMode:                "self",
 		MCPAllowWrites:         true,
+		ServerAddress:          "0.0.0.0:9090",
 	}
 
 	assert.Equal(t, want, a.ToConfig())

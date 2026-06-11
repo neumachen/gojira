@@ -1,5 +1,5 @@
-// Package grpcserver provides the gRPC server implementation for gojira.
-package grpcserver
+// Package grpc provides the gRPC server implementation for gojira.
+package grpc
 
 import (
 	"context"

@@ -1,4 +1,4 @@
-package grpcserver_test
+package grpc_test
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 
 	gojirav1 "github.com/neumachen/gojira/gen/gojira/v1"
 	"github.com/neumachen/gojira/internal/events"
-	"github.com/neumachen/gojira/internal/grpcserver"
+	gojiragrpc "github.com/neumachen/gojira/internal/grpc"
 )
 
 // fakeStream is a test double for grpc.ServerStreamingServer[gojirav1.CrawlEvent].
@@ -137,7 +137,7 @@ func TestNewGRPCStreamSink_KindMapping(t *testing.T) {
 			t.Parallel()
 
 			stream := &fakeStream{}
-			sink := grpcserver.NewGRPCStreamSink(stream)
+			sink := gojiragrpc.NewGRPCStreamSink(stream)
 			sink.Emit(tc.event)
 
 			got := stream.Sent()
@@ -169,7 +169,7 @@ func TestNewGRPCStreamSink_FieldMapping(t *testing.T) {
 	t.Parallel()
 
 	stream := &fakeStream{}
-	sink := grpcserver.NewGRPCStreamSink(stream)
+	sink := gojiragrpc.NewGRPCStreamSink(stream)
 
 	e := events.Event{
 		Kind:      events.KindIssueFetched,
@@ -206,7 +206,7 @@ func TestNewGRPCStreamSink_MultipleEvents(t *testing.T) {
 	t.Parallel()
 
 	stream := &fakeStream{}
-	sink := grpcserver.NewGRPCStreamSink(stream)
+	sink := gojiragrpc.NewGRPCStreamSink(stream)
 
 	evts := []events.Event{
 		{Kind: events.KindIssueQueued, IssueKey: "A-1", Timestamp: fixedTime},
@@ -241,7 +241,7 @@ func TestNewGRPCStreamSink_SendErrorSilentlyDiscarded(t *testing.T) {
 
 	// A stream that always returns an error from Send.
 	stream := &fakeStream{SendErr: context.Canceled}
-	sink := grpcserver.NewGRPCStreamSink(stream)
+	sink := gojiragrpc.NewGRPCStreamSink(stream)
 
 	// Emit must not panic even when Send returns an error.
 	sink.Emit(events.Event{Kind: events.KindIssueQueued, IssueKey: "X-1", Timestamp: fixedTime})
@@ -258,7 +258,7 @@ func TestNewGRPCStreamSink_CrawlSummaryNoSummaryOneof(t *testing.T) {
 	// events.Event does not carry a structured Summary field; the Summary
 	// oneof on CrawlEvent must be nil for KindCrawlSummary events.
 	stream := &fakeStream{}
-	sink := grpcserver.NewGRPCStreamSink(stream)
+	sink := gojiragrpc.NewGRPCStreamSink(stream)
 
 	sink.Emit(events.Event{
 		Kind:      events.KindCrawlSummary,
@@ -297,7 +297,7 @@ func TestGRPCSink_PopulatesSummaryOneof(t *testing.T) {
 	t.Parallel()
 
 	stream := &fakeStream{}
-	sink := grpcserver.NewGRPCStreamSink(stream)
+	sink := gojiragrpc.NewGRPCStreamSink(stream)
 
 	sink.Emit(events.Event{
 		Kind:      events.KindCrawlSummary,
@@ -361,7 +361,7 @@ func TestGRPCSink_NonSummaryLeavesOneofNil(t *testing.T) {
 	t.Parallel()
 
 	stream := &fakeStream{}
-	sink := grpcserver.NewGRPCStreamSink(stream)
+	sink := gojiragrpc.NewGRPCStreamSink(stream)
 
 	sink.Emit(events.Event{
 		Kind:      events.KindIssueFetched,

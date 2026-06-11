@@ -6,7 +6,7 @@
 // seam is exercised via initStdin (line reader) and readTokenFn (token
 // reader) function-fields; tests swap them in a t.Cleanup-restored
 // closure so production defaults are never permanently mutated.
-package main
+package cli
 
 import (
 	"bytes"

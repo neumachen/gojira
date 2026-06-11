@@ -11,7 +11,7 @@
 // (CreateIssue / UpdateIssue / AddComment / ListTransitions /
 // TransitionIssue / TransitionIssueByStatus), plus the dry-run body
 // builders (BuildCreateIssueBody / BuildUpdateIssueBody).
-package main
+package cli
 
 import (
 	"context"
@@ -24,7 +24,7 @@ import (
 	gojira "github.com/neumachen/gojira"
 	"github.com/neumachen/gojira/internal/config"
 	"github.com/neumachen/gojira/pkg/client"
-	cli "github.com/urfave/cli/v3"
+	urfave "github.com/urfave/cli/v3"
 )
 
 // ---------------------------------------------------------------------------
@@ -36,27 +36,27 @@ import (
 // env keys as crawl/serve so a single configured environment drives
 // every subcommand uniformly. These are the only flags
 // [loadWriteConfig] feeds into the config cascade for write commands.
-func connFlags(env map[string]string) []cli.Flag {
-	src := func(key string) cli.ValueSourceChain {
-		return cli.NewValueSourceChain(newMapValueSource(env, key))
+func connFlags(env map[string]string) []urfave.Flag {
+	src := func(key string) urfave.ValueSourceChain {
+		return urfave.NewValueSourceChain(newMapValueSource(env, key))
 	}
-	return []cli.Flag{
-		&cli.StringFlag{
+	return []urfave.Flag{
+		&urfave.StringFlag{
 			Name:    "config",
 			Usage:   "Path to YAML config file (overrides discovery)",
 			Sources: src("GOJIRA_CONFIG_FILE"),
 		},
-		&cli.StringFlag{
+		&urfave.StringFlag{
 			Name:    "site",
 			Usage:   "Jira Cloud base URL",
 			Sources: src("GOJIRA_SITE"),
 		},
-		&cli.StringFlag{
+		&urfave.StringFlag{
 			Name:    "user",
 			Usage:   "Atlassian account email",
 			Sources: src("GOJIRA_USER"),
 		},
-		&cli.StringFlag{
+		&urfave.StringFlag{
 			Name:    "token",
 			Usage:   "Atlassian API token",
 			Sources: src("GOJIRA_TOKEN"),
@@ -74,7 +74,7 @@ func connFlags(env map[string]string) []cli.Flag {
 // fall back to a sentinel placeholder ("." — the working directory)
 // so the validator passes without forcing every CLI user to set an
 // output directory they will never use.
-func loadWriteConfig(cmd *cli.Command, env map[string]string, stderr io.Writer) (gojira.Config, error) {
+func loadWriteConfig(cmd *urfave.Command, env map[string]string, stderr io.Writer) (gojira.Config, error) {
 	configPath := cmd.String("config")
 
 	fileCfg, err := gojira.LoadFileConfig(configPath)
@@ -113,7 +113,7 @@ func loadWriteConfig(cmd *cli.Command, env map[string]string, stderr io.Writer) 
 
 // requireOneKey enforces "exactly one positional argument" with the
 // same UX as runCrawl: a clear stderr error and an *exitErr{code:1}.
-func requireOneKey(cmd *cli.Command, stderr io.Writer) (string, error) {
+func requireOneKey(cmd *urfave.Command, stderr io.Writer) (string, error) {
 	positional := cmd.Args().Slice()
 	if len(positional) == 0 {
 		fmt.Fprintf(stderr, "error: missing required argument <ISSUE-KEY>\n")
@@ -128,7 +128,7 @@ func requireOneKey(cmd *cli.Command, stderr io.Writer) (string, error) {
 
 // stderrOf returns the cmd's resolved stderr writer, falling back to
 // os.Stderr when the root has none — mirroring runCrawl / runServe.
-func stderrOf(cmd *cli.Command) io.Writer {
+func stderrOf(cmd *urfave.Command) io.Writer {
 	w := cmd.Root().ErrWriter
 	if w == nil {
 		return os.Stderr
@@ -138,7 +138,7 @@ func stderrOf(cmd *cli.Command) io.Writer {
 
 // stdoutOf returns the cmd's resolved stdout writer, falling back to
 // os.Stdout when the root has none.
-func stdoutOf(cmd *cli.Command) io.Writer {
+func stdoutOf(cmd *urfave.Command) io.Writer {
 	w := cmd.Root().Writer
 	if w == nil {
 		return os.Stdout
@@ -184,28 +184,28 @@ func printAPIError(stderr io.Writer, err error) {
 // create
 // ---------------------------------------------------------------------------
 
-func createCommand(env map[string]string) *cli.Command {
+func createCommand(env map[string]string) *urfave.Command {
 	conn := connFlags(env)
 	flags := append(conn,
-		&cli.StringFlag{Name: "project", Usage: "Project key (required)"},
-		&cli.StringFlag{Name: "type", Usage: "Issue type", Value: "Task"},
-		&cli.StringFlag{Name: "summary", Usage: "Issue summary (required)"},
-		&cli.StringFlag{Name: "description", Usage: "Issue description (plain text, converted to ADF)"},
-		&cli.StringFlag{Name: "assignee", Usage: "Assignee accountId"},
-		&cli.StringSliceFlag{Name: "label", Usage: "Issue label (repeatable)"},
-		&cli.BoolFlag{Name: "dry-run", Usage: "Print the JSON body that would be POSTed and exit (no HTTP call)"},
+		&urfave.StringFlag{Name: "project", Usage: "Project key (required)"},
+		&urfave.StringFlag{Name: "type", Usage: "Issue type", Value: "Task"},
+		&urfave.StringFlag{Name: "summary", Usage: "Issue summary (required)"},
+		&urfave.StringFlag{Name: "description", Usage: "Issue description (plain text, converted to ADF)"},
+		&urfave.StringFlag{Name: "assignee", Usage: "Assignee accountId"},
+		&urfave.StringSliceFlag{Name: "label", Usage: "Issue label (repeatable)"},
+		&urfave.BoolFlag{Name: "dry-run", Usage: "Print the JSON body that would be POSTed and exit (no HTTP call)"},
 	)
-	return &cli.Command{
+	return &urfave.Command{
 		Name:  "create",
 		Usage: "Create a new Jira issue",
 		Flags: flags,
-		Action: func(ctx context.Context, cmd *cli.Command) error {
+		Action: func(ctx context.Context, cmd *urfave.Command) error {
 			return runCreate(ctx, cmd, env)
 		},
 	}
 }
 
-func runCreate(ctx context.Context, cmd *cli.Command, env map[string]string) error {
+func runCreate(ctx context.Context, cmd *urfave.Command, env map[string]string) error {
 	stderr := stderrOf(cmd)
 	stdout := stdoutOf(cmd)
 
@@ -268,27 +268,27 @@ func runCreate(ctx context.Context, cmd *cli.Command, env map[string]string) err
 // update
 // ---------------------------------------------------------------------------
 
-func updateCommand(env map[string]string) *cli.Command {
+func updateCommand(env map[string]string) *urfave.Command {
 	conn := connFlags(env)
 	flags := append(conn,
-		&cli.StringFlag{Name: "summary", Usage: "New summary"},
-		&cli.StringFlag{Name: "description", Usage: "New description (plain text)"},
-		&cli.StringFlag{Name: "assignee", Usage: "New assignee accountId"},
-		&cli.StringSliceFlag{Name: "label", Usage: "Replacement label (repeatable; replaces, does not append)"},
-		&cli.BoolFlag{Name: "dry-run", Usage: "Print the JSON body that would be PUT and exit (no HTTP call)"},
+		&urfave.StringFlag{Name: "summary", Usage: "New summary"},
+		&urfave.StringFlag{Name: "description", Usage: "New description (plain text)"},
+		&urfave.StringFlag{Name: "assignee", Usage: "New assignee accountId"},
+		&urfave.StringSliceFlag{Name: "label", Usage: "Replacement label (repeatable; replaces, does not append)"},
+		&urfave.BoolFlag{Name: "dry-run", Usage: "Print the JSON body that would be PUT and exit (no HTTP call)"},
 	)
-	return &cli.Command{
+	return &urfave.Command{
 		Name:      "update",
 		Usage:     "Edit fields on an existing Jira issue",
 		ArgsUsage: "<ISSUE-KEY>",
 		Flags:     flags,
-		Action: func(ctx context.Context, cmd *cli.Command) error {
+		Action: func(ctx context.Context, cmd *urfave.Command) error {
 			return runUpdate(ctx, cmd, env)
 		},
 	}
 }
 
-func runUpdate(ctx context.Context, cmd *cli.Command, env map[string]string) error {
+func runUpdate(ctx context.Context, cmd *urfave.Command, env map[string]string) error {
 	stderr := stderrOf(cmd)
 	stdout := stdoutOf(cmd)
 
@@ -351,23 +351,23 @@ func runUpdate(ctx context.Context, cmd *cli.Command, env map[string]string) err
 // comment
 // ---------------------------------------------------------------------------
 
-func commentCommand(env map[string]string) *cli.Command {
+func commentCommand(env map[string]string) *urfave.Command {
 	conn := connFlags(env)
 	flags := append(conn,
-		&cli.StringFlag{Name: "text", Usage: "Comment body (required, plain text)"},
+		&urfave.StringFlag{Name: "text", Usage: "Comment body (required, plain text)"},
 	)
-	return &cli.Command{
+	return &urfave.Command{
 		Name:      "comment",
 		Usage:     "Add a comment to a Jira issue",
 		ArgsUsage: "<ISSUE-KEY>",
 		Flags:     flags,
-		Action: func(ctx context.Context, cmd *cli.Command) error {
+		Action: func(ctx context.Context, cmd *urfave.Command) error {
 			return runComment(ctx, cmd, env)
 		},
 	}
 }
 
-func runComment(ctx context.Context, cmd *cli.Command, env map[string]string) error {
+func runComment(ctx context.Context, cmd *urfave.Command, env map[string]string) error {
 	stderr := stderrOf(cmd)
 	stdout := stdoutOf(cmd)
 
@@ -404,19 +404,19 @@ func runComment(ctx context.Context, cmd *cli.Command, env map[string]string) er
 // transitions (list)
 // ---------------------------------------------------------------------------
 
-func transitionsCommand(env map[string]string) *cli.Command {
-	return &cli.Command{
+func transitionsCommand(env map[string]string) *urfave.Command {
+	return &urfave.Command{
 		Name:      "transitions",
 		Usage:     "List the workflow transitions currently available for an issue",
 		ArgsUsage: "<ISSUE-KEY>",
 		Flags:     connFlags(env),
-		Action: func(ctx context.Context, cmd *cli.Command) error {
+		Action: func(ctx context.Context, cmd *urfave.Command) error {
 			return runTransitions(ctx, cmd, env)
 		},
 	}
 }
 
-func runTransitions(ctx context.Context, cmd *cli.Command, env map[string]string) error {
+func runTransitions(ctx context.Context, cmd *urfave.Command, env map[string]string) error {
 	stderr := stderrOf(cmd)
 	stdout := stdoutOf(cmd)
 
@@ -453,25 +453,25 @@ func runTransitions(ctx context.Context, cmd *cli.Command, env map[string]string
 // transition (execute)
 // ---------------------------------------------------------------------------
 
-func transitionCommand(env map[string]string) *cli.Command {
+func transitionCommand(env map[string]string) *urfave.Command {
 	conn := connFlags(env)
 	flags := append(conn,
-		&cli.StringFlag{Name: "id", Usage: "Transition id (mutually exclusive with --to-status)"},
-		&cli.StringFlag{Name: "to-status", Usage: "Target status name to resolve server-side (mutually exclusive with --id)"},
-		&cli.StringFlag{Name: "comment", Usage: "Optional comment to add during the transition"},
+		&urfave.StringFlag{Name: "id", Usage: "Transition id (mutually exclusive with --to-status)"},
+		&urfave.StringFlag{Name: "to-status", Usage: "Target status name to resolve server-side (mutually exclusive with --id)"},
+		&urfave.StringFlag{Name: "comment", Usage: "Optional comment to add during the transition"},
 	)
-	return &cli.Command{
+	return &urfave.Command{
 		Name:      "transition",
 		Usage:     "Move an issue through a workflow transition",
 		ArgsUsage: "<ISSUE-KEY>",
 		Flags:     flags,
-		Action: func(ctx context.Context, cmd *cli.Command) error {
+		Action: func(ctx context.Context, cmd *urfave.Command) error {
 			return runTransition(ctx, cmd, env)
 		},
 	}
 }
 
-func runTransition(ctx context.Context, cmd *cli.Command, env map[string]string) error {
+func runTransition(ctx context.Context, cmd *urfave.Command, env map[string]string) error {
 	stderr := stderrOf(cmd)
 	stdout := stdoutOf(cmd)
 

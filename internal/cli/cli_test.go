@@ -3,7 +3,7 @@
 // All tests use httptest.Server (no live network), capture stdout/stderr with
 // bytes.Buffer, and verify behavior through the run() function. No files
 // outside t.TempDir() are written.
-package main
+package cli
 
 import (
 	"bytes"

@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"os"
 	"sync/atomic"
 
-	cli "github.com/urfave/cli/v3"
+	urfave "github.com/urfave/cli/v3"
 
 	gojira "github.com/neumachen/gojira"
 	"github.com/neumachen/gojira/internal/config"
@@ -18,16 +18,16 @@ import (
 // serve subcommand
 // ---------------------------------------------------------------------------
 
-// serveCommand returns the *cli.Command for "gojira serve". The serve
+// serveCommand returns the *urfave.Command for "gojira serve". The serve
 // command boots a gRPC server that exposes the same library facade the
 // CLI uses (Classify, GetIssue, Crawl), letting other processes drive
 // gojira without spawning a child binary.
-func serveCommand(env map[string]string, signalled *atomic.Bool) *cli.Command {
-	return &cli.Command{
+func serveCommand(env map[string]string, signalled *atomic.Bool) *urfave.Command {
+	return &urfave.Command{
 		Name:  "serve",
 		Usage: "Run the gojira gRPC server",
 		Flags: serveFlags(env),
-		Action: func(ctx context.Context, cmd *cli.Command) error {
+		Action: func(ctx context.Context, cmd *urfave.Command) error {
 			return runServe(ctx, cmd, env, signalled)
 		},
 	}
@@ -40,47 +40,47 @@ func serveCommand(env map[string]string, signalled *atomic.Bool) *cli.Command {
 // specific knobs (caps, dev-status filters, etc.) come from the file +
 // env layers of the configuration cascade and are not flag-overridable
 // from the serve command.
-func serveFlags(env map[string]string) []cli.Flag {
-	src := func(key string) cli.ValueSourceChain {
-		return cli.NewValueSourceChain(newMapValueSource(env, key))
+func serveFlags(env map[string]string) []urfave.Flag {
+	src := func(key string) urfave.ValueSourceChain {
+		return urfave.NewValueSourceChain(newMapValueSource(env, key))
 	}
-	return []cli.Flag{
-		&cli.StringFlag{
+	return []urfave.Flag{
+		&urfave.StringFlag{
 			Name:    "config",
 			Usage:   "Path to YAML config file (overrides discovery)",
 			Sources: src("GOJIRA_CONFIG_FILE"),
 		},
-		&cli.StringFlag{
+		&urfave.StringFlag{
 			Name:    "site",
 			Usage:   "Jira Cloud base URL",
 			Sources: src("GOJIRA_SITE"),
 		},
-		&cli.StringFlag{
+		&urfave.StringFlag{
 			Name:    "user",
 			Usage:   "Atlassian account email",
 			Sources: src("GOJIRA_USER"),
 		},
-		&cli.StringFlag{
+		&urfave.StringFlag{
 			Name:    "token",
 			Usage:   "Atlassian API token",
 			Sources: src("GOJIRA_TOKEN"),
 		},
-		&cli.StringFlag{
+		&urfave.StringFlag{
 			Name:    "output-dir",
 			Usage:   "Output root directory",
 			Sources: src("GOJIRA_OUTPUT_DIR"),
 		},
-		&cli.StringFlag{
+		&urfave.StringFlag{
 			Name:    "address",
 			Usage:   "gRPC server bind address (default 127.0.0.1:50051)",
 			Sources: src("GOJIRA_SERVER_ADDRESS"),
 		},
-		&cli.StringFlag{
+		&urfave.StringFlag{
 			Name:    "log-level",
 			Usage:   "Log verbosity: error|warn|info|debug",
 			Sources: src("GOJIRA_LOG_LEVEL"),
 		},
-		&cli.StringFlag{
+		&urfave.StringFlag{
 			Name:    "log-format",
 			Usage:   "Log output format: text|json",
 			Sources: src("GOJIRA_LOG_FORMAT"),
@@ -102,7 +102,7 @@ func serveFlags(env map[string]string) []cli.Flag {
 // server that exits cleanly when asked to is the expected lifecycle,
 // not a partial success. Only a non-nil error from
 // [gojiragrpc.Serve] produces a non-zero exit.
-func runServe(ctx context.Context, cmd *cli.Command, env map[string]string, signalled *atomic.Bool) error {
+func runServe(ctx context.Context, cmd *urfave.Command, env map[string]string, signalled *atomic.Bool) error {
 	_ = signalled // mirrored from runCrawl for API consistency; Serve treats ctx cancel as clean shutdown
 	stderr := cmd.Root().ErrWriter
 	if stderr == nil {
@@ -129,7 +129,7 @@ func runServe(ctx context.Context, cmd *cli.Command, env map[string]string, sign
 // uses, but driven by serve's flag set. Errors are printed to stderr in
 // the same format runCrawl uses so the two subcommands present a
 // uniform failure surface.
-func loadServeConfig(cmd *cli.Command, env map[string]string, stderr io.Writer) (gojira.Config, error) {
+func loadServeConfig(cmd *urfave.Command, env map[string]string, stderr io.Writer) (gojira.Config, error) {
 	configPath := cmd.String("config")
 
 	fileCfg, err := gojira.LoadFileConfig(configPath)

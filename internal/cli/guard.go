@@ -9,7 +9,7 @@
 // an actionable message that points at `gojira init`.
 //
 // init, help, and --version are NOT guarded.
-package main
+package cli
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ import (
 	"os"
 
 	"github.com/neumachen/gojira/internal/config"
-	cli "github.com/urfave/cli/v3"
+	urfave "github.com/urfave/cli/v3"
 )
 
 // requireConfig is the pre-flight check guarding every Jira-touching
@@ -39,7 +39,7 @@ import (
 // to the command's stderr (cmd.Root().ErrWriter, falling back to
 // os.Stderr — matching runServe) and returns [*exitErr] with code 1.
 // The caller's existing config-cascade code is never reached.
-func requireConfig(cmd *cli.Command, env map[string]string) error {
+func requireConfig(cmd *urfave.Command, env map[string]string) error {
 	// Arm 1: --config flag.
 	if cmd.IsSet("config") {
 		return nil
@@ -83,7 +83,7 @@ func requireConfig(cmd *cli.Command, env map[string]string) error {
 
 // guardStderr returns the stderr writer for the guard's failure
 // message. It mirrors the fallback pattern used by runServe.
-func guardStderr(cmd *cli.Command) io.Writer {
+func guardStderr(cmd *urfave.Command) io.Writer {
 	if w := cmd.Root().ErrWriter; w != nil {
 		return w
 	}

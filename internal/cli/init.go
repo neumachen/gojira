@@ -9,7 +9,7 @@
 //
 // init is intentionally NOT guarded by [requireConfig]: it is the way
 // out of a no-config state and must always be runnable.
-package main
+package cli
 
 import (
 	"bufio"
@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	"github.com/neumachen/gojira/internal/config"
-	cli "github.com/urfave/cli/v3"
+	urfave "github.com/urfave/cli/v3"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
@@ -43,31 +43,31 @@ var readTokenFn = readTokenNoEcho
 // Command construction
 // ---------------------------------------------------------------------------
 
-// initCommand returns the *cli.Command for "gojira init". It mirrors
+// initCommand returns the *urfave.Command for "gojira init". It mirrors
 // the env-source pattern used by crawlFlags/connFlags so a partially
 // configured environment still drives init.
-func initCommand(env map[string]string) *cli.Command {
-	src := func(key string) cli.ValueSourceChain {
-		return cli.NewValueSourceChain(newMapValueSource(env, key))
+func initCommand(env map[string]string) *urfave.Command {
+	src := func(key string) urfave.ValueSourceChain {
+		return urfave.NewValueSourceChain(newMapValueSource(env, key))
 	}
-	return &cli.Command{
+	return &urfave.Command{
 		Name:      "init",
 		Usage:     "Create a gojira config file",
 		ArgsUsage: " ", // no positional args
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "site", Usage: "Jira Cloud base URL",
+		Flags: []urfave.Flag{
+			&urfave.StringFlag{Name: "site", Usage: "Jira Cloud base URL",
 				Sources: src("GOJIRA_SITE")},
-			&cli.StringFlag{Name: "user", Usage: "Atlassian account email",
+			&urfave.StringFlag{Name: "user", Usage: "Atlassian account email",
 				Sources: src("GOJIRA_USER")},
-			&cli.StringFlag{Name: "token", Usage: "Atlassian API token",
+			&urfave.StringFlag{Name: "token", Usage: "Atlassian API token",
 				Sources: src("GOJIRA_TOKEN")},
-			&cli.StringFlag{Name: "output-dir", Usage: "Output root directory",
+			&urfave.StringFlag{Name: "output-dir", Usage: "Output root directory",
 				Sources: src("GOJIRA_OUTPUT_DIR")},
-			&cli.StringFlag{Name: "server-address", Usage: "gRPC server bind address",
+			&urfave.StringFlag{Name: "server-address", Usage: "gRPC server bind address",
 				Sources: src("GOJIRA_SERVER_ADDRESS")},
-			&cli.BoolFlag{Name: "force", Usage: "Overwrite an existing config file"},
+			&urfave.BoolFlag{Name: "force", Usage: "Overwrite an existing config file"},
 		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
+		Action: func(ctx context.Context, cmd *urfave.Command) error {
 			return runInit(ctx, cmd, env)
 		},
 	}
@@ -81,7 +81,7 @@ func initCommand(env map[string]string) *cli.Command {
 // resolve the target path, refuse to clobber without --force, gather
 // values from flags / env / prompts, assemble an App, marshal to YAML,
 // and write 0o600.
-func runInit(ctx context.Context, cmd *cli.Command, env map[string]string) error {
+func runInit(ctx context.Context, cmd *urfave.Command, env map[string]string) error {
 	stderr := guardStderr(cmd)
 	stdout := initStdout(cmd)
 
@@ -197,7 +197,7 @@ func runInit(ctx context.Context, cmd *cli.Command, env map[string]string) error
 
 // initStdout returns the cmd's resolved stdout, falling back to
 // os.Stdout — mirroring stdoutOf in write_cmds.go.
-func initStdout(cmd *cli.Command) io.Writer {
+func initStdout(cmd *urfave.Command) io.Writer {
 	if w := cmd.Root().Writer; w != nil {
 		return w
 	}

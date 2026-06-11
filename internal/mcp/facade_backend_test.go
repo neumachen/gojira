@@ -1,7 +1,7 @@
 // facade_backend_test.go — verify facadeBackend against an httptest
 // fake Jira. No live network: every HTTP call must hit the
 // in-process httptest server.
-package mcpserver
+package mcp
 
 import (
 	"context"

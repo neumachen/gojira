@@ -1,17 +1,17 @@
 // tools_test.go — end-to-end via the SDK's in-memory transport.
 //
-// We build a real *mcp.Server with registerTools, expose it on an
-// in-memory transport pair, connect a real *mcp.Client to the other
+// We build a real *mcpsdk.Server with registerTools, expose it on an
+// in-memory transport pair, connect a real *mcpsdk.Client to the other
 // end, and assert on tools/list (gating) and a tools/call round
 // trip. NO live network, NO subprocess.
-package mcpserver
+package mcp
 
 import (
 	"context"
 	"strings"
 	"testing"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -61,13 +61,13 @@ func (f *fakeBackend) TransitionIssue(_ context.Context, _, _, _ string, _ Trans
 	return nil
 }
 
-// startInProcessMCP connects an mcp.Client to an mcp.Server built
+// startInProcessMCP connects an mcpsdk.Client to an mcpsdk.Server built
 // over [NewMCPServer], using the SDK's in-memory transport pair.
 // Server.Connect MUST run before Client.Connect — the SDK documents
 // that the client triggers MCP initialize during connect.
-func startInProcessMCP(t *testing.T, b mcpBackend, allowWrites bool) *mcp.ClientSession {
+func startInProcessMCP(t *testing.T, b mcpBackend, allowWrites bool) *mcpsdk.ClientSession {
 	t.Helper()
-	srvTransport, cliTransport := mcp.NewInMemoryTransports()
+	srvTransport, cliTransport := mcpsdk.NewInMemoryTransports()
 	server := NewMCPServer(b, allowWrites)
 	ctx := context.Background()
 
@@ -75,7 +75,7 @@ func startInProcessMCP(t *testing.T, b mcpBackend, allowWrites bool) *mcp.Client
 	require.NoError(t, err, "server.Connect")
 	t.Cleanup(func() { _ = srvSess.Close() })
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, nil)
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: "test", Version: "v0"}, nil)
 	cliSess, err := client.Connect(ctx, cliTransport, nil)
 	require.NoError(t, err, "client.Connect")
 	t.Cleanup(func() { _ = cliSess.Close() })
@@ -84,7 +84,7 @@ func startInProcessMCP(t *testing.T, b mcpBackend, allowWrites bool) *mcp.Client
 }
 
 // toolNames extracts the Name fields off ListToolsResult.Tools.
-func toolNames(r *mcp.ListToolsResult) []string {
+func toolNames(r *mcpsdk.ListToolsResult) []string {
 	out := make([]string, 0, len(r.Tools))
 	for _, t := range r.Tools {
 		out = append(out, t.Name)
@@ -138,7 +138,7 @@ func TestTools_AllowWritesTrue_ExposesAllNineTools(t *testing.T) {
 func TestTools_CallClassify_RoundTripsThroughHandler(t *testing.T) {
 	fake := &fakeBackend{}
 	cs := startInProcessMCP(t, fake, false)
-	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+	res, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
 		Name:      "classify",
 		Arguments: map[string]any{"input": "PROJ-1"},
 	})
@@ -148,7 +148,7 @@ func TestTools_CallClassify_RoundTripsThroughHandler(t *testing.T) {
 
 	// The handler wraps the classify.Result as indented JSON in a
 	// text content block; assert the issue key is present.
-	tc, ok := res.Content[0].(*mcp.TextContent)
+	tc, ok := res.Content[0].(*mcpsdk.TextContent)
 	require.True(t, ok, "first content block should be TextContent")
 	assert.Contains(t, tc.Text, "PROJ-1", "classify result must contain the input key")
 	assert.Equal(t, 1, fake.classifyCalls, "the handler should reach the backend exactly once")
@@ -168,14 +168,14 @@ func (e *errorBackend) GetIssue(_ context.Context, key string) (parse.Issue, []e
 
 func TestTools_HandlerError_BecomesIsErrorResult(t *testing.T) {
 	cs := startInProcessMCP(t, &errorBackend{}, false)
-	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+	res, err := cs.CallTool(context.Background(), &mcpsdk.CallToolParams{
 		Name:      "get_issue",
 		Arguments: map[string]any{"key": "NOPE-1"},
 	})
 	require.NoError(t, err, "transport-level call must succeed even on tool error")
 	require.True(t, res.IsError, "tool-level error must surface IsError=true")
 	require.NotEmpty(t, res.Content)
-	tc, ok := res.Content[0].(*mcp.TextContent)
+	tc, ok := res.Content[0].(*mcpsdk.TextContent)
 	require.True(t, ok)
 	assert.True(t, strings.HasPrefix(tc.Text, "not_found:"),
 		"sentinel category must prefix the error message; got %q", tc.Text)

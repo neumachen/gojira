@@ -2,7 +2,7 @@
 // an in-process grpc wired over a bufconn listener. No real
 // network: bufconn provides an in-memory net.Listener pair and the
 // grpc's WithXFunc seams stand in for the live facade.
-package mcpserver
+package mcp
 
 import (
 	"context"

@@ -1,7 +1,7 @@
 // mcp_test.go — exercises `gojira mcp` at the CLI boundary.
 //
 // The full in-memory MCP client/server round-trip + tool gating is
-// covered by internal/mcpserver/tools_test.go; here we focus on the
+// covered by internal/mcp/tools_test.go; here we focus on the
 // cmd-level wiring: the Phase-A guard still applies, the
 // mcp.mode-required check fires before any backend work, an invalid
 // mode is rejected with a clear message, a bridge-mode startup with
@@ -44,9 +44,14 @@ func TestMCP_Guard_NoConfig_FailsFast(t *testing.T) {
 
 func TestMCP_ModeMissing_FailsWithRequiredMessage(t *testing.T) {
 	neutralizeXDG(t)
+	// internal/mcp.Serve writes the mode-required diagnostic to
+	// os.Stderr (the package owns the message now). Capture both the
+	// cli ErrWriter (via captureRun) and os.Stderr so the assertion
+	// sees the full user-visible surface.
+	stopCapture := captureOSStderr(t)
 	// Site/User/Token via env satisfies the guard's arm 3; OUTPUT_DIR
 	// keeps loadServeConfig's LoadConfig validation happy. NO mcp.mode.
-	_, stderr, code := captureRun(context.Background(),
+	_, cmdStderr, code := captureRun(context.Background(),
 		[]string{"gojira", "mcp"},
 		map[string]string{
 			"GOJIRA_SITE":       "https://example.atlassian.net",
@@ -54,6 +59,7 @@ func TestMCP_ModeMissing_FailsWithRequiredMessage(t *testing.T) {
 			"GOJIRA_TOKEN":      "test-token",
 			"GOJIRA_OUTPUT_DIR": t.TempDir(),
 		})
+	stderr := cmdStderr + stopCapture()
 	assert.Equal(t, 1, code)
 	assert.Contains(t, strings.ToLower(stderr), "mcp.mode",
 		"stderr must mention mcp.mode; got %q", stderr)
@@ -67,7 +73,10 @@ func TestMCP_ModeMissing_FailsWithRequiredMessage(t *testing.T) {
 
 func TestMCP_ModeInvalid_FailsWithEnumMessage(t *testing.T) {
 	neutralizeXDG(t)
-	_, stderr, code := captureRun(context.Background(),
+	// internal/mcp.Serve writes the invalid-mode diagnostic to
+	// os.Stderr; capture it alongside the cli ErrWriter.
+	stopCapture := captureOSStderr(t)
+	_, cmdStderr, code := captureRun(context.Background(),
 		[]string{"gojira", "mcp"},
 		map[string]string{
 			"GOJIRA_SITE":       "https://example.atlassian.net",
@@ -76,6 +85,7 @@ func TestMCP_ModeInvalid_FailsWithEnumMessage(t *testing.T) {
 			"GOJIRA_OUTPUT_DIR": t.TempDir(),
 			"GOJIRA_MCP_MODE":   "banana",
 		})
+	stderr := cmdStderr + stopCapture()
 	assert.Equal(t, 1, code)
 	assert.Contains(t, strings.ToLower(stderr), "banana",
 		"stderr should name the offending mode value; got %q", stderr)
@@ -93,10 +103,13 @@ func TestMCP_ModeInvalid_FailsWithEnumMessage(t *testing.T) {
 // easy to spot.
 func TestMCP_BridgeMode_StartupLineNamesAddress(t *testing.T) {
 	neutralizeXDG(t)
+	// The "gojira mcp starting" line lives inside internal/mcp.Serve
+	// and goes to os.Stderr; capture it alongside the cli ErrWriter.
+	stopCapture := captureOSStderr(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	_, stderr, _ := captureRun(ctx,
+	_, cmdStderr, _ := captureRun(ctx,
 		[]string{"gojira", "mcp"},
 		map[string]string{
 			"GOJIRA_SITE":           "https://example.atlassian.net",
@@ -106,6 +119,7 @@ func TestMCP_BridgeMode_StartupLineNamesAddress(t *testing.T) {
 			"GOJIRA_MCP_MODE":       "bridge",
 			"GOJIRA_SERVER_ADDRESS": "127.0.0.1:55555", // a dial target the operator chose
 		})
+	stderr := cmdStderr + stopCapture()
 	assert.Contains(t, stderr, "127.0.0.1:55555",
 		"bridge-mode startup line must name the chosen address on stderr; got %q", stderr)
 }
@@ -132,13 +146,18 @@ func TestMCP_StdoutPurity_StartupGoesToStderr(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
+	// internal/mcp.Serve emits the "gojira mcp starting" line on
+	// os.Stderr; capture it so the assertion below can see it
+	// alongside the cli ErrWriter.
+	stopCapture := captureOSStderr(t)
+
 	// Cancel the context very quickly so runMCP returns shortly after
 	// Serve begins. The test's primary assertion is on stdout — we
 	// only need Serve to *start*, not to do anything useful.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	stdout, stderr, _ := captureRun(ctx,
+	stdout, cmdStderr, _ := captureRun(ctx,
 		[]string{"gojira", "mcp"},
 		map[string]string{
 			"GOJIRA_SITE":       srv.URL,
@@ -147,6 +166,7 @@ func TestMCP_StdoutPurity_StartupGoesToStderr(t *testing.T) {
 			"GOJIRA_OUTPUT_DIR": t.TempDir(),
 			"GOJIRA_MCP_MODE":   "self",
 		})
+	stderr := cmdStderr + stopCapture()
 
 	// The key invariant: human-readable runMCP diagnostics MUST land on
 	// stderr. The startup line and any error messages contain the word
@@ -202,13 +222,19 @@ func TestMCP_ConfigFile_CarriesMCPMode_Regression(t *testing.T) {
 	}, "\n"))
 	require.NoError(t, os.WriteFile(cfgPath, body, 0o600))
 
+	// internal/mcp.Serve writes any mode-related diagnostic to
+	// os.Stderr; capture both streams so the negative assertion
+	// covers the package's diagnostic surface too.
+	stopCapture := captureOSStderr(t)
+
 	// 200ms cancel so Serve returns without blocking on stdin.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
-	_, stderr, _ := captureRun(ctx,
+	_, cmdStderr, _ := captureRun(ctx,
 		[]string{"gojira", "mcp", "--config", cfgPath},
 		map[string]string{}) // no env — file must carry mode through the cascade
+	stderr := cmdStderr + stopCapture()
 
 	// The bug surfaced this exact string. After the fix, it must NOT
 	// appear: mode was successfully read from the file and survived

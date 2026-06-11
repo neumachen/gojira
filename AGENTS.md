@@ -135,6 +135,27 @@ code is committed under `gen/gojira/v1/`. After editing the proto, run:
 This runs `buf lint` then `buf generate`. Commit the regenerated
 `*.pb.go` and `*_grpc.pb.go` files alongside the proto change.
 
+### Package layout
+
+Packages are organized by importability:
+
+- `pkg/` holds the reusable, third-party-importable packages
+  (`pkg/classify`, `pkg/client`, `pkg/log`).
+- The repo root holds the library facade (`gojira.go`, `format.go`,
+  package `gojira`, imported as `github.com/neumachen/gojira`) — the
+  module's public front door.
+- `internal/` holds everything not meant for external import: the
+  protocol services (`internal/grpc`, `internal/mcp`), the CLI wiring
+  (`internal/cli`), and the domain machinery (crawl, fetch, parse,
+  render, config, …).
+- `cmd/` holds the executables. `cmd/gojira/main.go` is a thin
+  entrypoint that calls `internal/cli.Run`.
+- `gen/` holds generated protobuf code.
+
+Both protocol services expose a single encapsulated entry point —
+`grpc.Serve(ctx, cfg)` and `mcp.Serve(ctx, cfg)` — so the binary only
+ever passes a fully-resolved Config; the SDKs never leak into cmd/.
+
 ### Test layout
 
 Integration and end-to-end tests live in the `integtest` package at the
@@ -142,16 +163,16 @@ module root (`integtest/`), together with their `testdata/` fixtures.
 This keeps the module-root package (`github.com/neumachen/gojira`)
 production-only and gives cross-package acceptance tests a single home.
 
-- New integration/E2E tests (those that import the public `gojira`,
-  `client`, or `classify` packages and drive them through `httptest`
-  servers or fixture files) MUST be added under `integtest/`, in
-  `package integtest`.
+- New integration/E2E tests (those that import the public `gojira`
+  facade plus the `pkg/client` and `pkg/classify` packages and drive
+  them through `httptest` servers or fixture files) MUST be added
+  under `integtest/`, in `package integtest`.
 - Fixtures consumed by those tests live under `integtest/testdata/`
   and are read with paths relative to the package directory (e.g.
   `filepath.Join("testdata", "acceptance", name)`).
 - Package-local unit tests stay with the code they test (e.g.
-  `internal/crawl/crawl_test.go`, `client/*_test.go`). Do not move
-  those into `integtest`.
+  `internal/crawl/crawl_test.go`, `pkg/client/*_test.go`). Do not
+  move those into `integtest`.
 
 ### Write operations
 
@@ -179,9 +200,11 @@ powers this surface.
 **Stdout-purity invariant (load-bearing).** In `gojira mcp`, stdout
 carries the MCP JSON-RPC protocol stream — nothing else may be written
 there. Every diagnostic, log line, or error message on the mcp serving
-path MUST go to stderr (see `cmd/gojira/mcp.go` for the wiring). Any
-new code on the MCP path must respect this invariant; the cmd-level
-stdout-purity test in `cmd/gojira/mcp_test.go` is the regression guard.
+path MUST go to stderr (see `internal/cli/mcp.go` for the cmd action
+and `internal/mcp/serve.go` for the encapsulated `Serve` that enforces
+stdout-purity). Any new code on the MCP path must respect this
+invariant; the cmd-level stdout-purity test in
+`internal/cli/mcp_test.go` is the regression guard.
 
 ### Observability and tracing
 

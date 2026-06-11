@@ -21,7 +21,7 @@ import (
 	"time"
 
 	gojira "github.com/neumachen/gojira"
-	gojiralog "github.com/neumachen/gojira/log"
+	gojiralog "github.com/neumachen/gojira/pkg/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

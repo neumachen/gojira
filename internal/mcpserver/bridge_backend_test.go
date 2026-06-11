@@ -20,13 +20,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	gojira "github.com/neumachen/gojira"
-	"github.com/neumachen/gojira/classify"
-	"github.com/neumachen/gojira/client"
 	gojirav1 "github.com/neumachen/gojira/gen/gojira/v1"
 	"github.com/neumachen/gojira/internal/events"
 	"github.com/neumachen/gojira/internal/extract"
 	"github.com/neumachen/gojira/internal/grpcserver"
 	"github.com/neumachen/gojira/internal/parse"
+	"github.com/neumachen/gojira/pkg/classify"
+	"github.com/neumachen/gojira/pkg/client"
 )
 
 // dialBufconn returns a *grpc.ClientConn dialed over the supplied

@@ -18,10 +18,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/neumachen/gojira/classify"
 	"github.com/neumachen/gojira/internal/config"
 	"github.com/neumachen/gojira/internal/events"
-	gojiralog "github.com/neumachen/gojira/log"
+	"github.com/neumachen/gojira/pkg/classify"
+	gojiralog "github.com/neumachen/gojira/pkg/log"
 )
 
 // ---------------------------------------------------------------------------

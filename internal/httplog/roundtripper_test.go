@@ -14,7 +14,7 @@ import (
 
 	"github.com/neumachen/gojira/internal/httplog"
 	"github.com/neumachen/gojira/internal/trace"
-	gojiralog "github.com/neumachen/gojira/log"
+	gojiralog "github.com/neumachen/gojira/pkg/log"
 )
 
 // ---------------------------------------------------------------------------

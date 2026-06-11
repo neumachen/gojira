@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/neumachen/gojira/classify"
 	"github.com/neumachen/gojira/internal/extract"
 	"github.com/neumachen/gojira/internal/parse"
+	"github.com/neumachen/gojira/pkg/classify"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

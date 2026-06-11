@@ -20,9 +20,9 @@ import (
 	"strings"
 
 	"github.com/neumachen/errext"
-	"github.com/neumachen/gojira/classify"
 	"github.com/neumachen/gojira/internal/extract"
 	"github.com/neumachen/gojira/internal/parse"
+	"github.com/neumachen/gojira/pkg/classify"
 )
 
 // NodeKind labels the kind of a graph node.

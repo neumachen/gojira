@@ -16,7 +16,7 @@ import (
 	gojirav1 "github.com/neumachen/gojira/gen/gojira/v1"
 	"github.com/neumachen/gojira/internal/config"
 	"github.com/neumachen/gojira/internal/grpcserver"
-	"github.com/neumachen/gojira/log"
+	"github.com/neumachen/gojira/pkg/log"
 	cli "github.com/urfave/cli/v3"
 )
 

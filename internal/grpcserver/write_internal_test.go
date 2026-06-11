@@ -15,8 +15,8 @@ import (
 	"google.golang.org/grpc/codes"
 
 	gojira "github.com/neumachen/gojira"
-	"github.com/neumachen/gojira/client"
 	gojirav1 "github.com/neumachen/gojira/gen/gojira/v1"
+	"github.com/neumachen/gojira/pkg/client"
 )
 
 // writeServer builds a Server with the supplied write-fake injections.

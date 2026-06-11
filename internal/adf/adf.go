@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	"github.com/neumachen/errext"
-	"github.com/neumachen/gojira/classify"
+	"github.com/neumachen/gojira/pkg/classify"
 )
 
 // ---- ADF wire types --------------------------------------------------------

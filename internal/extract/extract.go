@@ -14,9 +14,9 @@ package extract
 
 import (
 	"github.com/neumachen/errext"
-	"github.com/neumachen/gojira/classify"
 	"github.com/neumachen/gojira/internal/adf"
 	"github.com/neumachen/gojira/internal/parse"
+	"github.com/neumachen/gojira/pkg/classify"
 )
 
 // Source identifies where in a Jira issue a Reference was discovered.

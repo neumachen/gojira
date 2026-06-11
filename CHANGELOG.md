@@ -4,6 +4,31 @@ All notable changes to gojira are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **BREAKING (layout):** Reorganized packages by importability. The
+  reusable `classify`, `client`, and `log` packages moved under `pkg/`
+  (import paths gain a `/pkg/` segment). The library facade
+  (`github.com/neumachen/gojira`) is unchanged and remains at the root.
+- **BREAKING (internal):** `internal/grpcserver` is now `internal/grpc`
+  with an encapsulated `grpc.Serve(ctx, cfg)`; `internal/mcpserver` is
+  now `internal/mcp` with `mcp.Serve(ctx, cfg)`. The gRPC and MCP SDKs
+  are fully hidden behind these packages — the command layer no longer
+  imports them.
+- **BREAKING (internal):** All CLI command wiring moved from
+  `cmd/gojira` (package main) into `internal/cli`. `cmd/gojira/main.go`
+  is now a thin entrypoint calling `cli.Run`.
+- **BREAKING (config):** The gRPC bind address is now a first-class
+  `Config.ServerAddress` field resolved by the configuration cascade
+  (default `127.0.0.1:50051`). The separate `gojira.ServerConfig` and
+  `gojira.LoadServerConfig` accessors were removed; read
+  `Config.ServerAddress` from a loaded `Config` instead.
+
+All changes are pre-1.0 (alpha); no external consumers depend on the
+previous paths.
+
 ## [v0.1.0] — 2026-06-06
 
 The first tagged release. Ships the CLI's `crawl` subcommand

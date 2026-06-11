@@ -61,7 +61,7 @@ import (
 
 	gojira "github.com/neumachen/gojira"
 	"github.com/neumachen/gojira/internal/config"
-	"github.com/neumachen/gojira/log"
+	"github.com/neumachen/gojira/pkg/log"
 	cli "github.com/urfave/cli/v3"
 )
 

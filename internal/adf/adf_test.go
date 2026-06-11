@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/neumachen/gojira/classify"
 	"github.com/neumachen/gojira/internal/adf"
+	"github.com/neumachen/gojira/pkg/classify"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

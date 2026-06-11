@@ -22,8 +22,8 @@ import (
 	"os"
 
 	gojira "github.com/neumachen/gojira"
-	"github.com/neumachen/gojira/client"
 	"github.com/neumachen/gojira/internal/config"
+	"github.com/neumachen/gojira/pkg/client"
 	cli "github.com/urfave/cli/v3"
 )
 

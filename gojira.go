@@ -44,8 +44,6 @@ import (
 	"strings"
 
 	"github.com/neumachen/errext"
-	"github.com/neumachen/gojira/classify"
-	"github.com/neumachen/gojira/client"
 	"github.com/neumachen/gojira/internal/config"
 	"github.com/neumachen/gojira/internal/crawl"
 	"github.com/neumachen/gojira/internal/devstatus"
@@ -57,6 +55,8 @@ import (
 	"github.com/neumachen/gojira/internal/output"
 	"github.com/neumachen/gojira/internal/parse"
 	"github.com/neumachen/gojira/internal/render"
+	"github.com/neumachen/gojira/pkg/classify"
+	"github.com/neumachen/gojira/pkg/client"
 )
 
 // ---------------------------------------------------------------------------

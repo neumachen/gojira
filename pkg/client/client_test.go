@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/neumachen/gojira/client"
 	"github.com/neumachen/gojira/internal/config"
-	gojiralog "github.com/neumachen/gojira/log"
+	"github.com/neumachen/gojira/pkg/client"
+	gojiralog "github.com/neumachen/gojira/pkg/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

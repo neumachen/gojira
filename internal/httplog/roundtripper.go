@@ -38,7 +38,7 @@ import (
 	"time"
 
 	"github.com/neumachen/gojira/internal/trace"
-	"github.com/neumachen/gojira/log"
+	"github.com/neumachen/gojira/pkg/log"
 )
 
 // RoundTripper wraps a base [http.RoundTripper] and logs every request's

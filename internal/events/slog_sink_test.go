@@ -10,7 +10,7 @@ import (
 
 	"github.com/neumachen/errext"
 	"github.com/neumachen/gojira/internal/events"
-	gojiralog "github.com/neumachen/gojira/log"
+	gojiralog "github.com/neumachen/gojira/pkg/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

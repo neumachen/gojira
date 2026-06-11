@@ -13,11 +13,11 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gojira "github.com/neumachen/gojira"
-	"github.com/neumachen/gojira/client"
 	gojirav1 "github.com/neumachen/gojira/gen/gojira/v1"
 	"github.com/neumachen/gojira/internal/extract"
 	"github.com/neumachen/gojira/internal/parse"
 	"github.com/neumachen/gojira/internal/render"
+	"github.com/neumachen/gojira/pkg/client"
 )
 
 // Server implements the gojirav1.GojiraServer interface.

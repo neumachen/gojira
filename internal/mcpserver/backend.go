@@ -13,10 +13,10 @@ import (
 	"context"
 
 	"github.com/neumachen/gojira"
-	"github.com/neumachen/gojira/classify"
-	"github.com/neumachen/gojira/client"
 	"github.com/neumachen/gojira/internal/extract"
 	"github.com/neumachen/gojira/internal/parse"
+	"github.com/neumachen/gojira/pkg/classify"
+	"github.com/neumachen/gojira/pkg/client"
 )
 
 // ProgressFn is the callback the crawl-style tools use to surface

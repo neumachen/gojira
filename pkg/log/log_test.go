@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/neumachen/errext"
-	"github.com/neumachen/gojira/log"
+	"github.com/neumachen/gojira/pkg/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -50,8 +50,6 @@ import (
 	"time"
 
 	"github.com/neumachen/errext"
-	"github.com/neumachen/gojira/classify"
-	"github.com/neumachen/gojira/client"
 	"github.com/neumachen/gojira/internal/config"
 	"github.com/neumachen/gojira/internal/events"
 	"github.com/neumachen/gojira/internal/extract"
@@ -62,7 +60,9 @@ import (
 	"github.com/neumachen/gojira/internal/parse"
 	"github.com/neumachen/gojira/internal/render"
 	"github.com/neumachen/gojira/internal/trace"
-	gojiralog "github.com/neumachen/gojira/log"
+	"github.com/neumachen/gojira/pkg/classify"
+	"github.com/neumachen/gojira/pkg/client"
+	gojiralog "github.com/neumachen/gojira/pkg/log"
 )
 
 // ChildDiscoverer is the interface the crawl orchestrator depends on for

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/neumachen/gojira/client"
+	"github.com/neumachen/gojira/pkg/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

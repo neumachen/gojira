@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	gojiralog "github.com/neumachen/gojira/log"
+	gojiralog "github.com/neumachen/gojira/pkg/log"
 )
 
 // ---------------------------------------------------------------------------

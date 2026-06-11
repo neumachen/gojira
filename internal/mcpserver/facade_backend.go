@@ -9,11 +9,11 @@ import (
 	"sync/atomic"
 
 	"github.com/neumachen/gojira"
-	"github.com/neumachen/gojira/classify"
-	"github.com/neumachen/gojira/client"
 	"github.com/neumachen/gojira/internal/events"
 	"github.com/neumachen/gojira/internal/extract"
 	"github.com/neumachen/gojira/internal/parse"
+	"github.com/neumachen/gojira/pkg/classify"
+	"github.com/neumachen/gojira/pkg/client"
 )
 
 // facadeBackend implements [mcpBackend] in "self" mode by delegating

@@ -12,12 +12,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/neumachen/gojira"
-	"github.com/neumachen/gojira/classify"
-	"github.com/neumachen/gojira/client"
 	gojirav1 "github.com/neumachen/gojira/gen/gojira/v1"
 	"github.com/neumachen/gojira/internal/extract"
 	"github.com/neumachen/gojira/internal/graph"
 	"github.com/neumachen/gojira/internal/parse"
+	"github.com/neumachen/gojira/pkg/classify"
+	"github.com/neumachen/gojira/pkg/client"
 )
 
 // bridgeBackend implements [mcpBackend] in "bridge" mode by forwarding

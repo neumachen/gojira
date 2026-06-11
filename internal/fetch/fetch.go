@@ -28,8 +28,8 @@ import (
 	"context"
 
 	"github.com/neumachen/errext"
-	"github.com/neumachen/gojira/client"
 	"github.com/neumachen/gojira/internal/config"
+	"github.com/neumachen/gojira/pkg/client"
 )
 
 // Fetcher is the interface the crawl package depends on for retrieving

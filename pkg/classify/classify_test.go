@@ -3,7 +3,7 @@ package classify_test
 import (
 	"testing"
 
-	"github.com/neumachen/gojira/classify"
+	"github.com/neumachen/gojira/pkg/classify"
 	"github.com/stretchr/testify/assert"
 )
 

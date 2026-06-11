@@ -52,9 +52,9 @@ import (
 	"sync"
 
 	"github.com/neumachen/errext"
-	"github.com/neumachen/gojira/client"
 	"github.com/neumachen/gojira/internal/config"
 	"github.com/neumachen/gojira/internal/parse"
+	"github.com/neumachen/gojira/pkg/client"
 )
 
 // Discoverer queries Jira for hierarchy children of a given issue.

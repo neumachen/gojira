@@ -43,10 +43,10 @@ func TestStoreInterfaceShape(t *testing.T) {
 		s := &fakeStore{}
 		ctx := context.Background()
 
-		if err := s.Write(ctx, "PLATENG-1", "# index", "## outbound"); err != nil {
+		if err := s.Write(ctx, "PROJ-1", "# index", "## outbound"); err != nil {
 			t.Fatalf("unexpected error on first Write: %v", err)
 		}
-		got, ok := s.written["PLATENG-1"]
+		got, ok := s.written["PROJ-1"]
 		if !ok {
 			t.Fatal("entry not stored after Write")
 		}
@@ -62,10 +62,10 @@ func TestStoreInterfaceShape(t *testing.T) {
 		s := &fakeStore{}
 		ctx := context.Background()
 
-		if err := s.Write(ctx, "PLATENG-2", "# index", ""); err != nil {
+		if err := s.Write(ctx, "PROJ-2", "# index", ""); err != nil {
 			t.Fatalf("unexpected error on first Write: %v", err)
 		}
-		err := s.Write(ctx, "PLATENG-2", "# index again", "")
+		err := s.Write(ctx, "PROJ-2", "# index again", "")
 		if err == nil {
 			t.Fatal("expected ErrAlreadyExists on second Write, got nil")
 		}
@@ -78,10 +78,10 @@ func TestStoreInterfaceShape(t *testing.T) {
 		s := &fakeStore{}
 		ctx := context.Background()
 
-		if err := s.Write(ctx, "PLATENG-3", "# index", ""); err != nil {
+		if err := s.Write(ctx, "PROJ-3", "# index", ""); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		got := s.written["PLATENG-3"]
+		got := s.written["PROJ-3"]
 		if got.outboundMD != "" {
 			t.Errorf("outboundMD: got %q, want empty string", got.outboundMD)
 		}
@@ -106,8 +106,8 @@ func TestFSStore(t *testing.T) {
 	}{
 		{
 			name:       "writes index and outbound",
-			key:        "PLATENG-10",
-			indexMD:    "# PLATENG-10",
+			key:        "PROJ-10",
+			indexMD:    "# PROJ-10",
 			outboundMD: "## outbound",
 			refetch:    false,
 			seedFirst:  false,
@@ -115,8 +115,8 @@ func TestFSStore(t *testing.T) {
 		},
 		{
 			name:       "writes index only when outboundMD empty",
-			key:        "PLATENG-11",
-			indexMD:    "# PLATENG-11",
+			key:        "PROJ-11",
+			indexMD:    "# PROJ-11",
 			outboundMD: "",
 			refetch:    false,
 			seedFirst:  false,
@@ -124,8 +124,8 @@ func TestFSStore(t *testing.T) {
 		},
 		{
 			name:       "returns ErrAlreadyExists when index exists and refetch false",
-			key:        "PLATENG-12",
-			indexMD:    "# PLATENG-12 new",
+			key:        "PROJ-12",
+			indexMD:    "# PROJ-12 new",
 			outboundMD: "",
 			refetch:    false,
 			seedFirst:  true,
@@ -133,8 +133,8 @@ func TestFSStore(t *testing.T) {
 		},
 		{
 			name:       "refetch=true overwrites existing files",
-			key:        "PLATENG-13",
-			indexMD:    "# PLATENG-13 updated",
+			key:        "PROJ-13",
+			indexMD:    "# PROJ-13 updated",
 			outboundMD: "## updated outbound",
 			refetch:    true,
 			seedFirst:  true,

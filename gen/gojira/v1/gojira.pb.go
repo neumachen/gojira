@@ -335,7 +335,7 @@ func (x *ClassifyResponse) GetUrl() string {
 // GetIssueRequest identifies the issue to fetch and the desired output format.
 type GetIssueRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// key is the Jira issue key, e.g. "PLATENG-1147".
+	// key is the Jira issue key, e.g. "PROJ-1147".
 	Key string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
 	// format selects the presentation format for the response.
 	Format        OutputFormat `protobuf:"varint,2,opt,name=format,proto3,enum=gojira.v1.OutputFormat" json:"format,omitempty"`
@@ -507,7 +507,7 @@ type Issue struct {
 	Status string `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"`
 	// issue_type is the display name of the issue type, e.g. "Story".
 	IssueType string `protobuf:"bytes,5,opt,name=issue_type,json=issueType,proto3" json:"issue_type,omitempty"`
-	// project is the Jira project key, e.g. "PLATENG".
+	// project is the Jira project key, e.g. "PROJ".
 	Project string `protobuf:"bytes,6,opt,name=project,proto3" json:"project,omitempty"`
 	// assignee is the display name of the assignee, or empty if unassigned.
 	Assignee string `protobuf:"bytes,7,opt,name=assignee,proto3" json:"assignee,omitempty"`
@@ -1464,7 +1464,7 @@ func (x *Reference) GetRelation() string {
 type CrawlRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// start_keys is the list of Jira issue keys to start crawling from,
-	// e.g. ["PLATENG-1147"].
+	// e.g. ["PROJ-1147"].
 	StartKeys []string `protobuf:"bytes,1,rep,name=start_keys,json=startKeys,proto3" json:"start_keys,omitempty"`
 	// depth_limit is the maximum recursion depth. 0 means unlimited.
 	DepthLimit int32 `protobuf:"varint,2,opt,name=depth_limit,json=depthLimit,proto3" json:"depth_limit,omitempty"`

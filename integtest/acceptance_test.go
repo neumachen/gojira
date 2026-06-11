@@ -1727,7 +1727,7 @@ func issueWithSummaryAndIDJSON(t *testing.T, key, site, numericID string, summar
 // issueWithMultiSummaryJSON returns a Jira issue JSON with a
 // customfield_10000 blob whose inner json={...} payload reports
 // arbitrary per-dataType counts. Pass -1 for any field to omit that
-// section entirely (mirroring the PLATENG-1578 reproducer shape where
+// section entirely (mirroring the PROJ-1578 reproducer shape where
 // only "repository" was present).
 func issueWithMultiSummaryJSON(t *testing.T, key, site, numericID string, pr, br, cm, rp, bd int, isStale bool) []byte {
 	t.Helper()
@@ -1790,8 +1790,8 @@ const branchFixture = `{
       "_instance": {"type": "GitHub", "name": "GitHub"},
       "branches": [
         {
-          "name": "feature/PLATENG-1578",
-          "url": "https://github.com/org/api/tree/feature%2FPLATENG-1578",
+          "name": "feature/PROJ-1578",
+          "url": "https://github.com/org/api/tree/feature%2FPROJ-1578",
           "repository": {"name": "org/api", "url": "https://github.com/org/api"},
           "lastCommit": {
             "id": "abc123def456",
@@ -1859,7 +1859,7 @@ const buildFixture = `{
           "state": "SUCCESSFUL",
           "lastUpdated": "2026-06-02T14:30:00.000+0000",
           "testSummary": {"totalNumber": 100, "passedNumber": 100, "failedNumber": 0, "skippedNumber": 0},
-          "references": [{"name": "feature/PLATENG-1578", "uri": "refs/heads/feature/PLATENG-1578"}]
+          "references": [{"name": "feature/PROJ-1578", "uri": "refs/heads/feature/PROJ-1578"}]
         }
       ]
     }
@@ -1891,10 +1891,10 @@ const devStatusFixture = `{
         {
           "id": "#557",
           "url": "https://github.com/org/repo/pull/557",
-          "name": "PLATENG-1573: Cognito User Pool",
+          "name": "PROJ-1573: Cognito User Pool",
           "status": "MERGED",
           "lastUpdate": "2026-05-08T13:44:52.000+0000",
-          "source": {"branch": "feature/PLATENG-1573", "url": "https://github.com/org/repo/tree/feature%2FPLATENG-1573"},
+          "source": {"branch": "feature/PROJ-1573", "url": "https://github.com/org/repo/tree/feature%2FPROJ-1573"},
           "destination": {"branch": "main", "url": "https://github.com/org/repo/tree/main"},
           "author": {"name": "Robert Tirserio", "avatar": "https://example.com/a.png"},
           "reviewers": [{"name": "Kareem Hepburn", "avatar": "x", "approved": true}],
@@ -1906,10 +1906,10 @@ const devStatusFixture = `{
         {
           "id": "#560",
           "url": "https://github.com/org/repo/pull/560",
-          "name": "PLATENG-1573: Follow-up",
+          "name": "PROJ-1573: Follow-up",
           "status": "MERGED",
           "lastUpdate": "2026-05-09T09:12:30.000+0000",
-          "source": {"branch": "feature/PLATENG-1573-followup", "url": "https://github.com/org/repo/tree/feature%2FPLATENG-1573-followup"},
+          "source": {"branch": "feature/PROJ-1573-followup", "url": "https://github.com/org/repo/tree/feature%2FPROJ-1573-followup"},
           "destination": {"branch": "main", "url": "https://github.com/org/repo/tree/main"},
           "author": {"name": "Kareem Hepburn", "avatar": "x"},
           "reviewers": [],
@@ -2049,7 +2049,7 @@ func acConfigDevStatus(t *testing.T, siteURL, outputDir string, includeDevStatus
 func TestAC23_DevStatusPullRequestsSurfaced(t *testing.T) {
 	outputDir := t.TempDir()
 	srv := newDevStatusServer(t)
-	srv.issueResponses["PLATENG-1573"] = issueWithSummaryAndIDJSON(t, "PLATENG-1573", srv.URL, "86679", 2)
+	srv.issueResponses["PROJ-1573"] = issueWithSummaryAndIDJSON(t, "PROJ-1573", srv.URL, "86679", 2)
 	// Default body (devStatusFixture) is PR-flavoured; with the gate
 	// gone, every dataType is queried, so explicitly silence the four
 	// non-PR dataTypes to keep the per-subsection assertions tight.
@@ -2063,7 +2063,7 @@ func TestAC23_DevStatusPullRequestsSurfaced(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	sum, err := gojira.Crawl(ctx, cfg, []string{"PLATENG-1573"}, nil)
+	sum, err := gojira.Crawl(ctx, cfg, []string{"PROJ-1573"}, nil)
 	require.NoError(t, err, "Crawl")
 	assert.Equal(t, 1, sum.Fetched, "Summary.Fetched")
 
@@ -2075,7 +2075,7 @@ func TestAC23_DevStatusPullRequestsSurfaced(t *testing.T) {
 		assert.Equal(t, int64(1), srv.callsFor(dt), "dataType %s called exactly once", dt)
 	}
 
-	indexPath := filepath.Join(outputDir, "PLATENG-1573", "index.md")
+	indexPath := filepath.Join(outputDir, "PROJ-1573", "index.md")
 	content, err := os.ReadFile(indexPath)
 	require.NoError(t, err, "ReadFile %s", indexPath)
 	md := string(content)
@@ -2101,20 +2101,20 @@ func TestAC23_DevStatusPullRequestsSurfaced(t *testing.T) {
 func TestAC25_IncludeDevStatusFalseDisables(t *testing.T) {
 	outputDir := t.TempDir()
 	srv := newDevStatusServer(t)
-	srv.issueResponses["PLATENG-1573"] = issueWithSummaryAndIDJSON(t, "PLATENG-1573", srv.URL, "86679", 2)
+	srv.issueResponses["PROJ-1573"] = issueWithSummaryAndIDJSON(t, "PROJ-1573", srv.URL, "86679", 2)
 
 	cfg := acConfigDevStatus(t, srv.URL, outputDir, false)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	sum, err := gojira.Crawl(ctx, cfg, []string{"PLATENG-1573"}, nil)
+	sum, err := gojira.Crawl(ctx, cfg, []string{"PROJ-1573"}, nil)
 	require.NoError(t, err, "Crawl")
 	assert.Equal(t, 1, sum.Fetched)
 
 	// AC 25: opt-out disables Dev Status entirely across every dataType.
 	assert.Equal(t, int64(0), srv.devStatusCalls.Load(), "Dev Status must NOT be called when IncludeDevStatus=false")
 
-	indexPath := filepath.Join(outputDir, "PLATENG-1573", "index.md")
+	indexPath := filepath.Join(outputDir, "PROJ-1573", "index.md")
 	content, err := os.ReadFile(indexPath)
 	require.NoError(t, err)
 	assert.NotContains(t, string(content), "## Development", "no Development section when enrichment disabled")
@@ -2129,7 +2129,7 @@ func TestAC25_IncludeDevStatusFalseDisables(t *testing.T) {
 func TestAC26_BranchesSurfacedWithoutPRs(t *testing.T) {
 	outputDir := t.TempDir()
 	srv := newDevStatusServer(t)
-	srv.issueResponses["PLATENG-1578"] = issueWithMultiSummaryJSON(t, "PLATENG-1578", srv.URL, "86680",
+	srv.issueResponses["PROJ-1578"] = issueWithMultiSummaryJSON(t, "PROJ-1578", srv.URL, "86680",
 		0 /*pr*/, 1 /*br*/, 0, 0, 0, false)
 	srv.devStatusBodies["branch"] = branchFixture
 	// Silence the other four dataTypes; gate-removal means each is
@@ -2144,7 +2144,7 @@ func TestAC26_BranchesSurfacedWithoutPRs(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	sum, err := gojira.Crawl(ctx, cfg, []string{"PLATENG-1578"}, nil)
+	sum, err := gojira.Crawl(ctx, cfg, []string{"PROJ-1578"}, nil)
 	require.NoError(t, err, "Crawl")
 	assert.Equal(t, 1, sum.Fetched)
 
@@ -2154,14 +2154,14 @@ func TestAC26_BranchesSurfacedWithoutPRs(t *testing.T) {
 	assert.Equal(t, int64(1), srv.callsFor("branch"))
 	assert.Equal(t, int64(1), srv.callsFor("pullrequest"))
 
-	indexPath := filepath.Join(outputDir, "PLATENG-1578", "index.md")
+	indexPath := filepath.Join(outputDir, "PROJ-1578", "index.md")
 	content, err := os.ReadFile(indexPath)
 	require.NoError(t, err)
 	md := string(content)
 	assert.Contains(t, md, "## Development\n", "Development section present")
 	assert.Contains(t, md, "### Branches\n", "Branches subsection present")
 	assert.NotContains(t, md, "### Pull requests", "Pull requests subsection elided")
-	assert.Contains(t, md, "feature/PLATENG-1578", "branch name rendered")
+	assert.Contains(t, md, "feature/PROJ-1578", "branch name rendered")
 }
 
 // TestAC27_CommitsSurfaced verifies that an issue whose only Dev
@@ -2171,7 +2171,7 @@ func TestAC26_BranchesSurfacedWithoutPRs(t *testing.T) {
 func TestAC27_CommitsSurfaced(t *testing.T) {
 	outputDir := t.TempDir()
 	srv := newDevStatusServer(t)
-	srv.issueResponses["PLATENG-1579"] = issueWithMultiSummaryJSON(t, "PLATENG-1579", srv.URL, "86681",
+	srv.issueResponses["PROJ-1579"] = issueWithMultiSummaryJSON(t, "PROJ-1579", srv.URL, "86681",
 		0, 0, 1, 0, 0, false)
 	srv.devStatusBodies["commit"] = commitFixture
 	srv.devStatusBodies["pullrequest"] = emptyFixture
@@ -2183,13 +2183,13 @@ func TestAC27_CommitsSurfaced(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	sum, err := gojira.Crawl(ctx, cfg, []string{"PLATENG-1579"}, nil)
+	sum, err := gojira.Crawl(ctx, cfg, []string{"PROJ-1579"}, nil)
 	require.NoError(t, err, "Crawl")
 	assert.Equal(t, 1, sum.Fetched)
 	assert.Equal(t, int64(5), srv.devStatusCalls.Load(), "all five dataTypes queried")
 	assert.Equal(t, int64(1), srv.callsFor("commit"))
 
-	indexPath := filepath.Join(outputDir, "PLATENG-1579", "index.md")
+	indexPath := filepath.Join(outputDir, "PROJ-1579", "index.md")
 	content, err := os.ReadFile(indexPath)
 	require.NoError(t, err)
 	md := string(content)
@@ -2198,7 +2198,7 @@ func TestAC27_CommitsSurfaced(t *testing.T) {
 	assert.Contains(t, md, "feat: add OIDC initiate endpoint", "commit message rendered")
 }
 
-// TestAC28_RepositoriesSurfaced is the literal PLATENG-1578 staleness
+// TestAC28_RepositoriesSurfaced is the literal PROJ-1578 staleness
 // reproducer, updated for the gate-removal contract. The summary
 // indicates repository.count=1 and reports no pullrequest section at
 // all, with isStale:true (matching the original user-reported
@@ -2212,7 +2212,7 @@ func TestAC27_CommitsSurfaced(t *testing.T) {
 func TestAC28_RepositoriesSurfaced(t *testing.T) {
 	outputDir := t.TempDir()
 	srv := newDevStatusServer(t)
-	srv.issueResponses["PLATENG-1578"] = issueWithMultiSummaryJSON(t, "PLATENG-1578", srv.URL, "86680",
+	srv.issueResponses["PROJ-1578"] = issueWithMultiSummaryJSON(t, "PROJ-1578", srv.URL, "86680",
 		-1 /*pr omitted*/, -1, -1, 1 /*rp*/, -1, true /*isStale: real response had it set*/)
 	srv.devStatusBodies["repository"] = repositoryFixture
 	// Silence the other four dataTypes so only the repository call
@@ -2227,7 +2227,7 @@ func TestAC28_RepositoriesSurfaced(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	sum, err := gojira.Crawl(ctx, cfg, []string{"PLATENG-1578"}, nil)
+	sum, err := gojira.Crawl(ctx, cfg, []string{"PROJ-1578"}, nil)
 	require.NoError(t, err, "Crawl")
 	assert.Equal(t, 1, sum.Fetched)
 
@@ -2241,7 +2241,7 @@ func TestAC28_RepositoriesSurfaced(t *testing.T) {
 		assert.Equal(t, int64(1), srv.callsFor(dt), "dataType %s called exactly once", dt)
 	}
 
-	indexPath := filepath.Join(outputDir, "PLATENG-1578", "index.md")
+	indexPath := filepath.Join(outputDir, "PROJ-1578", "index.md")
 	content, err := os.ReadFile(indexPath)
 	require.NoError(t, err)
 	md := string(content)
@@ -2259,7 +2259,7 @@ func TestAC28_RepositoriesSurfaced(t *testing.T) {
 func TestAC29_BuildsSurfaced(t *testing.T) {
 	outputDir := t.TempDir()
 	srv := newDevStatusServer(t)
-	srv.issueResponses["PLATENG-1580"] = issueWithMultiSummaryJSON(t, "PLATENG-1580", srv.URL, "86682",
+	srv.issueResponses["PROJ-1580"] = issueWithMultiSummaryJSON(t, "PROJ-1580", srv.URL, "86682",
 		0, 0, 0, 0, 1 /*bd*/, false)
 	srv.devStatusBodies["build"] = buildFixture
 	srv.devStatusBodies["pullrequest"] = emptyFixture
@@ -2271,13 +2271,13 @@ func TestAC29_BuildsSurfaced(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	sum, err := gojira.Crawl(ctx, cfg, []string{"PLATENG-1580"}, nil)
+	sum, err := gojira.Crawl(ctx, cfg, []string{"PROJ-1580"}, nil)
 	require.NoError(t, err, "Crawl")
 	assert.Equal(t, 1, sum.Fetched)
 	assert.Equal(t, int64(5), srv.devStatusCalls.Load(), "all five dataTypes queried")
 	assert.Equal(t, int64(1), srv.callsFor("build"))
 
-	indexPath := filepath.Join(outputDir, "PLATENG-1580", "index.md")
+	indexPath := filepath.Join(outputDir, "PROJ-1580", "index.md")
 	content, err := os.ReadFile(indexPath)
 	require.NoError(t, err)
 	md := string(content)
@@ -2308,7 +2308,7 @@ func (r *recordingSink) snapshot() []gojira.Event {
 	return out
 }
 
-// TestAC31_DevStatusPartialFailureIsWarning is the PLATENG-1417
+// TestAC31_DevStatusPartialFailureIsWarning is the PROJ-1417
 // regression test at the end-to-end facade layer. When one Dev Status
 // dataType call returns a malformed body (causing the client to fail
 // the unmarshal) while another succeeds, the issue MUST still be
@@ -2317,20 +2317,20 @@ func (r *recordingSink) snapshot() []gojira.Event {
 // "devstatus.partial_failure" event (not "issue.failed"). The crawl
 // summary's Failed count MUST NOT include the parent issue.
 //
-// This locks in the fix for the user-reported PLATENG-1417 case where
+// This locks in the fix for the user-reported PROJ-1417 case where
 // dataType=commit and dataType=build returned object-shaped "errors"
 // entries that crashed the unmarshal; the symptoms were:
 //   - an ERROR log line "dev status enrichment failed for
-//     PLATENG-1417 ... event=issue.failed"
+//     PROJ-1417 ... event=issue.failed"
 //   - no ## Development section in the rendered output, even though
 //     dataType=pullrequest would have returned a usable PR.
 func TestAC31_DevStatusPartialFailureIsWarning(t *testing.T) {
 	outputDir := t.TempDir()
 	srv := newDevStatusServer(t)
 	// Stale-summary path forces fallback-to-all (the user's actual
-	// PLATENG-1417 scope, where the summary did not steer the gate
+	// PROJ-1417 scope, where the summary did not steer the gate
 	// toward a single dataType).
-	srv.issueResponses["PLATENG-1417"] = issueWithMultiSummaryJSON(t, "PLATENG-1417", srv.URL, "86679",
+	srv.issueResponses["PROJ-1417"] = issueWithMultiSummaryJSON(t, "PROJ-1417", srv.URL, "86679",
 		0, 0, 0, 0, 0, true)
 
 	// dataType=pullrequest returns a valid response with one PR.
@@ -2354,7 +2354,7 @@ func TestAC31_DevStatusPartialFailureIsWarning(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	sum, err := gojira.Crawl(ctx, cfg, []string{"PLATENG-1417"}, sink)
+	sum, err := gojira.Crawl(ctx, cfg, []string{"PROJ-1417"}, sink)
 	require.NoError(t, err, "Crawl must not return a fatal error for a partial enrichment failure")
 
 	// Summary semantics: the issue is Fetched, NOT Failed. The crawl
@@ -2363,18 +2363,18 @@ func TestAC31_DevStatusPartialFailureIsWarning(t *testing.T) {
 	// must not pollute it.
 	assert.Equal(t, 1, sum.Fetched, "Summary.Fetched")
 	assert.Equal(t, 0, sum.Failed, "Summary.Failed must NOT include partial-enrichment failures")
-	assert.NotContains(t, sum.FailedKeys, "PLATENG-1417",
+	assert.NotContains(t, sum.FailedKeys, "PROJ-1417",
 		"FailedKeys must not include an issue whose enrichment partially failed")
 
 	// Event taxonomy:
-	//   - at least one devstatus.partial_failure for PLATENG-1417;
-	//   - zero issue.failed events for PLATENG-1417.
+	//   - at least one devstatus.partial_failure for PROJ-1417;
+	//   - zero issue.failed events for PROJ-1417.
 	var (
 		partialCount int
 		failedCount  int
 	)
 	for _, e := range sink.snapshot() {
-		if e.IssueKey != "PLATENG-1417" {
+		if e.IssueKey != "PROJ-1417" {
 			continue
 		}
 		switch e.Kind {
@@ -2391,9 +2391,9 @@ func TestAC31_DevStatusPartialFailureIsWarning(t *testing.T) {
 
 	// Rendered output: ## Development is present and the PR that did
 	// come back is rendered. This is the visible side of the user's
-	// PLATENG-1417 report — they observed no Development section at
+	// PROJ-1417 report — they observed no Development section at
 	// all, which would mean the partial data was discarded.
-	indexPath := filepath.Join(outputDir, "PLATENG-1417", "index.md")
+	indexPath := filepath.Join(outputDir, "PROJ-1417", "index.md")
 	content, readErr := os.ReadFile(indexPath)
 	require.NoError(t, readErr, "ReadFile %s", indexPath)
 	md := string(content)
@@ -2486,7 +2486,7 @@ func TestAC32_CustomFieldsRenderedWithHumanLabels(t *testing.T) {
 	// values.
 	assert.Contains(t, md, "- **Sprint**:\n  ```json\n",
 		"named structured field opens a fenced json block under its bullet")
-	assert.Contains(t, md, `"name": "PLATENG Sprint 57"`,
+	assert.Contains(t, md, `"name": "PROJ Sprint 57"`,
 		"pretty-printed sprint content preserved")
 	assert.Contains(t, md, "\n  ```\n",
 		"fenced block closes with proper 2-space indent")
@@ -2500,7 +2500,7 @@ func TestAC32_CustomFieldsRenderedWithHumanLabels(t *testing.T) {
 }
 
 // TestAC33_DevStatusSummaryFieldRendersAsCodeBlock pins the
-// PLATENG-1578 rendering fix: a custom-field value whose raw JSON
+// PROJ-1578 rendering fix: a custom-field value whose raw JSON
 // form is a JSON-encoded *string* whose decoded contents are
 // structured non-JSON text — the canonical case is Atlassian's
 // `customfield_10000` Dev Status summary in its

@@ -121,7 +121,7 @@ type Span struct {
 	// Empty for a root span.
 	ParentSpanID string
 
-	// TicketID is the Jira issue key (e.g. "PLATENG-1417") when the
+	// TicketID is the Jira issue key (e.g. "PROJ-1417") when the
 	// span is issue-scoped. Empty for cross-cutting work (the root
 	// span, an end-of-run summary, etc.).
 	TicketID string

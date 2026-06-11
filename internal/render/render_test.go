@@ -410,7 +410,7 @@ func TestClassifyCustomField(t *testing.T) {
 			wantMulti: false,
 		},
 
-		// --- JSON-string second-pass cases (PLATENG-1578 Dev Status
+		// --- JSON-string second-pass cases (PROJ-1578 Dev Status
 		//     summary field rendering, AC 33). ---
 
 		{
@@ -658,7 +658,7 @@ func TestRenderIssue_CustomFieldsStructuredAsJSONBlock(t *testing.T) {
 		SourceURL: "https://example.atlassian.net/browse/EXAMPLE-1",
 		CustomFields: map[string]json.RawMessage{
 			"customfield_10115": json.RawMessage(
-				`[{"id":4815,"name":"PLATENG Sprint 57","state":"closed"}]`),
+				`[{"id":4815,"name":"PROJ Sprint 57","state":"closed"}]`),
 		},
 		Names: map[string]string{
 			"customfield_10115": "Sprint",
@@ -672,7 +672,7 @@ func TestRenderIssue_CustomFieldsStructuredAsJSONBlock(t *testing.T) {
 	// The pretty body lines are 2-space-indented too.
 	assert.Contains(t, got, "  [\n", "pretty array opens on its own line")
 	assert.Contains(t, got, "  ]\n", "pretty array closes on its own line")
-	assert.Contains(t, got, `"name": "PLATENG Sprint 57"`, "pretty content preserved")
+	assert.Contains(t, got, `"name": "PROJ Sprint 57"`, "pretty content preserved")
 }
 
 // TestRenderIssue_CustomFieldsInvalidJSONAsPlainFence verifies that
@@ -713,7 +713,7 @@ func TestRenderIssue_CustomFieldsInvalidJSONAsPlainFence(t *testing.T) {
 //
 // Cases cover the happy path (empty/balanced containers, simple
 // Java notation, nested Java notation, embedded JSON objects and
-// arrays, the PLATENG-1573 dogfood blob), the JSON-string
+// arrays, the PROJ-1573 dogfood blob), the JSON-string
 // edge case (string literals containing braces must not confuse
 // the depth tracker), and the malformed-input paths (unbalanced
 // braces, `json=` not followed by a JSON value, `json=` followed
@@ -815,7 +815,7 @@ func TestPrettifyAtlassianBlob(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			// The PLATENG-1573 dogfood blob in full. We do not pin
+			// The PROJ-1573 dogfood blob in full. We do not pin
 			// the exact bytes because the JSON pretty-printer's
 			// output is governed by encoding/json (its own contract)
 			// and re-pinning every byte would couple this test to
@@ -825,7 +825,7 @@ func TestPrettifyAtlassianBlob(t *testing.T) {
 			// each get `: ` (colon-space) and their own line, the
 			// `"errors": []` collapsed array is visible, and the
 			// `"lastUpdated":` key sits on its own line.
-			name:  "PLATENG-1573 realistic blob",
+			name:  "PROJ-1573 realistic blob",
 			input: platEng1573Blob,
 			wantSubstr: []string{
 				"repository={\n",
@@ -925,7 +925,7 @@ func TestPrettifyAtlassianBlob(t *testing.T) {
 }
 
 // TestRenderIssue_CustomFieldsStringStructuredAsPlainFence verifies
-// the PLATENG-1578 case: a custom-field value whose raw JSON form
+// the PROJ-1578 case: a custom-field value whose raw JSON form
 // is a JSON-encoded *string* whose decoded contents are structured
 // non-JSON text (Atlassian's Dev Status summary `{key=value,
 // json={...}}` notation) must render in a PLAIN ``` fenced block
@@ -1110,33 +1110,33 @@ func TestRenderOutbound_Empty(t *testing.T) {
 // single bullet line in the documented format.
 func TestRenderIssue_WithPullRequests(t *testing.T) {
 	issue := parse.Issue{
-		Key:       "PLATENG-1573",
+		Key:       "PROJ-1573",
 		Summary:   "Cognito User Pool module",
 		Status:    "Done",
 		IssueType: "Story",
 		Reporter:  "Robert Tirserio",
 		Created:   mustTime("2026-05-01T08:00:00Z"),
 		Updated:   mustTime("2026-05-08T13:44:52Z"),
-		SourceURL: "https://example.atlassian.net/browse/PLATENG-1573",
+		SourceURL: "https://example.atlassian.net/browse/PROJ-1573",
 		// Make sure Relationships is also populated to validate ordering.
-		Parent: &parse.ParentRef{Key: "PLATENG-1566", Summary: "Auth Epic"},
+		Parent: &parse.ParentRef{Key: "PROJ-1566", Summary: "Auth Epic"},
 		DevStatus: parse.DevStatusData{
 			PullRequests: []parse.PullRequest{
 				{
 					ID:           "#557",
 					URL:          "https://github.com/org/repo/pull/557",
-					Title:        "PLATENG-1573: Cognito User Pool",
+					Title:        "PROJ-1573: Cognito User Pool",
 					Status:       "MERGED",
 					Application:  "GitHub",
 					Repository:   "org/repo",
-					SourceBranch: "feature/PLATENG-1573",
+					SourceBranch: "feature/PROJ-1573",
 					DestBranch:   "main",
 					Author:       "Robert Tirserio",
 				},
 				{
 					ID:          "#560",
 					URL:         "https://github.com/org/repo/pull/560",
-					Title:       "PLATENG-1573: Follow-up",
+					Title:       "PROJ-1573: Follow-up",
 					Status:      "MERGED",
 					Application: "GitHub",
 					Repository:  "org/repo",
@@ -1155,9 +1155,9 @@ func TestRenderIssue_WithPullRequests(t *testing.T) {
 
 	// Each PR rendered as documented.
 	assert.Contains(t, got,
-		"- [MERGED] [PLATENG-1573: Cognito User Pool](https://github.com/org/repo/pull/557) — `org/repo` · Robert Tirserio\n")
+		"- [MERGED] [PROJ-1573: Cognito User Pool](https://github.com/org/repo/pull/557) — `org/repo` · Robert Tirserio\n")
 	assert.Contains(t, got,
-		"- [MERGED] [PLATENG-1573: Follow-up](https://github.com/org/repo/pull/560) — `org/repo` · Kareem Hepburn\n")
+		"- [MERGED] [PROJ-1573: Follow-up](https://github.com/org/repo/pull/560) — `org/repo` · Kareem Hepburn\n")
 
 	// Subsections not populated must be elided.
 	assert.NotContains(t, got, "### Branches", "Branches subsection elided when empty")
@@ -1235,12 +1235,12 @@ func TestRenderIssue_PullRequestMissingRepoAndAuthor(t *testing.T) {
 func TestRenderIssue_WithAllDevStatusSubsections(t *testing.T) {
 	authored := mustTime("2026-06-02T14:30:00Z")
 	issue := parse.Issue{
-		Key:       "PLATENG-1578",
+		Key:       "PROJ-1578",
 		Summary:   "OIDC flow",
 		Status:    "In Progress",
 		IssueType: "Story",
 		Reporter:  "Robert Tirserio",
-		SourceURL: "https://example.atlassian.net/browse/PLATENG-1578",
+		SourceURL: "https://example.atlassian.net/browse/PROJ-1578",
 		DevStatus: parse.DevStatusData{
 			PullRequests: []parse.PullRequest{
 				{
@@ -1253,8 +1253,8 @@ func TestRenderIssue_WithAllDevStatusSubsections(t *testing.T) {
 			},
 			Branches: []parse.Branch{
 				{
-					Name:          "feature/PLATENG-1578",
-					URL:           "https://github.com/org/api/tree/feature/PLATENG-1578",
+					Name:          "feature/PROJ-1578",
+					URL:           "https://github.com/org/api/tree/feature/PROJ-1578",
 					Repository:    "org/api",
 					LastCommitID:  "abc123d",
 					LastCommitURL: "https://github.com/org/api/commit/abc123",
@@ -1315,7 +1315,7 @@ func TestRenderIssue_WithAllDevStatusSubsections(t *testing.T) {
 
 	// Spot-check the documented per-entity formats.
 	assert.Contains(t, got,
-		"- [feature/PLATENG-1578](https://github.com/org/api/tree/feature/PLATENG-1578) — `org/api` · last: [abc123d](https://github.com/org/api/commit/abc123)\n")
+		"- [feature/PROJ-1578](https://github.com/org/api/tree/feature/PROJ-1578) — `org/api` · last: [abc123d](https://github.com/org/api/commit/abc123)\n")
 	assert.Contains(t, got,
 		"- [abc123d](https://github.com/org/api/commit/abc123) — \"feat: add OIDC initiate endpoint\" · Kareem Hepburn · 2026-06-02\n")
 	assert.Contains(t, got, "- [org/api](https://github.com/org/api)\n")

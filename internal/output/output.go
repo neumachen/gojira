@@ -54,7 +54,7 @@ var ErrAlreadyExists = errors.New("output: issue already exists on disk")
 //
 // Parameters:
 //   - outputDir: root output directory (e.g. "/tmp/out").
-//   - key: Jira issue key (e.g. "PLATENG-1147"). Must be non-empty and
+//   - key: Jira issue key (e.g. "PROJ-1147"). Must be non-empty and
 //     must not contain a path separator.
 //   - indexMD: content for <outputDir>/<key>/index.md.
 //   - outboundMD: content for <outputDir>/<key>/references/outbound.md.

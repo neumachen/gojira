@@ -173,7 +173,7 @@ func TestNewGRPCStreamSink_FieldMapping(t *testing.T) {
 
 	e := events.Event{
 		Kind:      events.KindIssueFetched,
-		IssueKey:  "PLATENG-1147",
+		IssueKey:  "PROJ-1147",
 		Message:   "issue fetched successfully",
 		Timestamp: fixedTime,
 	}
@@ -188,8 +188,8 @@ func TestNewGRPCStreamSink_FieldMapping(t *testing.T) {
 	if msg.Kind != gojirav1.CrawlEvent_KIND_ISSUE_FETCHED {
 		t.Errorf("Kind: got %v, want KIND_ISSUE_FETCHED", msg.Kind)
 	}
-	if msg.IssueKey != "PLATENG-1147" {
-		t.Errorf("IssueKey: got %q, want %q", msg.IssueKey, "PLATENG-1147")
+	if msg.IssueKey != "PROJ-1147" {
+		t.Errorf("IssueKey: got %q, want %q", msg.IssueKey, "PROJ-1147")
 	}
 	if msg.Message != "issue fetched successfully" {
 		t.Errorf("Message: got %q, want %q", msg.Message, "issue fetched successfully")

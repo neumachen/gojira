@@ -26,16 +26,16 @@ You should not:
 GOAL:
 Design an idiomatic Go package and/or application that can start from a Jira issue key, download that issue, discover Jira links, development links, pull request links, and other references, recursively download newly discovered Jira issues, and write the resulting issue graph as Markdown files with correct Markdown references.
 
-The goal appears to be building a durable Jira-to-Markdown mirroring/crawling tool, where an issue such as `PLATENG-1147` becomes a local Markdown issue page at:
+The goal appears to be building a durable Jira-to-Markdown mirroring/crawling tool, where an issue such as `PROJ-1147` becomes a local Markdown issue page at:
 
-`PLATENG-1147/index.md`
+`PROJ-1147/index.md`
 
 The design must also account for Jira's Development panel, especially GitHub pull request links shown under the issue's Details section, even when the Jira configuration does not reliably return or expose the Jira key for those pull requests.
 
 CONTEXT:
 The desired behavior is:
 
-1. Open or fetch a Jira issue, for example `PLATENG-1147`.
+1. Open or fetch a Jira issue, for example `PROJ-1147`.
 2. Download the issue using the most modern official Jira API available.
 3. Fetch the current JSON API/schema information from Atlassian so the tool can understand issue fields and rich content fields.
 4. Inspect the issue body and other relevant fields for Jira links.
@@ -62,7 +62,7 @@ The output model must distinguish between:
   - The source issue's Markdown should include a local Markdown reference to the downloaded Jira content.
   - The design should propose a stable per-issue reference directory, such as:
 
-    `PLATENG-1147/references/`
+    `PROJ-1147/references/`
 
     or another clearly justified name.
 
@@ -104,7 +104,7 @@ CONFIRMED REQUIREMENTS:
 - The design must be Go-oriented and idiomatic.
 - It must support a package/API and may also support an application/CLI.
 - It must use modern official Jira APIs.
-- It must start from an issue key such as `PLATENG-1147`.
+- It must start from an issue key such as `PROJ-1147`.
 - It must download the starting issue.
 - It must fetch current Atlassian JSON API/schema information rather than relying only on stale hard-coded assumptions.
 - It must discover Jira links inside issue body/content.
@@ -121,7 +121,7 @@ CONFIRMED REQUIREMENTS:
 
   Example:
 
-  `PLATENG-1147/index.md`
+  `PROJ-1147/index.md`
 
 - The design should choose and justify a per-issue reference directory name, such as:
 
@@ -139,7 +139,7 @@ ASSUMPTIONS TO VALIDATE OR STATE CLEARLY:
 - Do not assume pull requests or automation data are always available from the same issue endpoint; identify the official APIs or limitations.
 
 INPUTS AVAILABLE / RUNTIME INPUTS TO DESIGN FOR:
-- One or more starting Jira issue keys, for example `PLATENG-1147`.
+- One or more starting Jira issue keys, for example `PROJ-1147`.
 - Jira site URL and/or Atlassian cloud ID.
 - Authentication credentials or token source.
 - Output directory.
@@ -233,11 +233,11 @@ Produce a complete design that includes:
    - Avoid accidental duplication or recursive filesystem explosions.
    - Show a short example for:
 
-     `PLATENG-1147/index.md`
+     `PROJ-1147/index.md`
 
    - Show a short example for a per-issue reference directory, for example:
 
-     `PLATENG-1147/references/`
+     `PROJ-1147/references/`
 
    - Include how local Jira issue links should be rendered.
    - Include how GitHub pull request links should be rendered.
@@ -307,8 +307,8 @@ Structure your answer with these sections:
 ACCEPTANCE CRITERIA:
 Your design is successful if:
 - It can be handed to a Go engineer for implementation.
-- It clearly explains how `PLATENG-1147` becomes `PLATENG-1147/index.md`.
-- It proposes and justifies a per-issue reference directory such as `PLATENG-1147/references/`.
+- It clearly explains how `PROJ-1147` becomes `PROJ-1147/index.md`.
+- It proposes and justifies a per-issue reference directory such as `PROJ-1147/references/`.
 - It recursively crawls Jira links without infinite loops.
 - It does not recursively crawl non-Jira links by default.
 - It represents non-Jira links as standard Markdown links.

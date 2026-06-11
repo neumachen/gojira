@@ -486,7 +486,7 @@ func TestListFields_401(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // devStatusBody is the canonical Dev Status response shape captured from
-// a real Atlassian tenant (instinctvet.atlassian.net, PLATENG-1573).
+// a real Atlassian tenant (instinctvet.atlassian.net, PROJ-1573).
 const devStatusBody = `{
   "errors": [],
   "detail": [
@@ -504,12 +504,12 @@ const devStatusBody = `{
         {
           "id": "#557",
           "url": "https://github.com/org/repo/pull/557",
-          "name": "PLATENG-1573: Implement feature",
+          "name": "PROJ-1573: Implement feature",
           "status": "MERGED",
           "lastUpdate": "2026-05-08T13:44:52.000+0000",
           "source": {
-            "branch": "feature/PLATENG-1573",
-            "url": "https://github.com/org/repo/tree/feature%2FPLATENG-1573"
+            "branch": "feature/PROJ-1573",
+            "url": "https://github.com/org/repo/tree/feature%2FPROJ-1573"
           },
           "destination": {
             "branch": "main",
@@ -559,7 +559,7 @@ func TestDevStatus_Success(t *testing.T) {
 	pr := resp.Detail[0].PullRequests[0]
 	assert.Equal(t, "#557", pr.ID)
 	assert.Equal(t, "https://github.com/org/repo/pull/557", pr.URL)
-	assert.Equal(t, "PLATENG-1573: Implement feature", pr.Name)
+	assert.Equal(t, "PROJ-1573: Implement feature", pr.Name)
 	assert.Equal(t, "MERGED", pr.Status)
 	assert.Equal(t, "org/repo", pr.Repository)
 	assert.Equal(t, "main", pr.Destination.Branch)
@@ -614,9 +614,9 @@ const devStatusMultiEntityBody = `{
       "pullRequests": [],
       "branches": [
         {
-          "name": "feature/PLATENG-1578",
-          "url": "https://github.com/org/api/tree/feature%2FPLATENG-1578",
-          "createPullRequestUrl": "https://github.com/org/api/pull/new/feature%2FPLATENG-1578",
+          "name": "feature/PROJ-1578",
+          "url": "https://github.com/org/api/tree/feature%2FPROJ-1578",
+          "createPullRequestUrl": "https://github.com/org/api/pull/new/feature%2FPROJ-1578",
           "repository": {"name": "org/api", "url": "https://github.com/org/api"},
           "lastCommit": {
             "id": "abc123def456",
@@ -654,7 +654,7 @@ const devStatusMultiEntityBody = `{
           "state": "SUCCESSFUL",
           "lastUpdated": "2026-06-02T14:30:00.000+0000",
           "testSummary": {"totalNumber": 100, "passedNumber": 100, "failedNumber": 0, "skippedNumber": 0},
-          "references": [{"name": "feature/PLATENG-1578", "uri": "refs/heads/feature/PLATENG-1578"}]
+          "references": [{"name": "feature/PROJ-1578", "uri": "refs/heads/feature/PROJ-1578"}]
         }
       ]
     }
@@ -681,7 +681,7 @@ func TestDevStatus_UnmarshalsAllEntityTypes(t *testing.T) {
 	inst := resp.Detail[0]
 
 	require.Len(t, inst.Branches, 1, "branches populated")
-	assert.Equal(t, "feature/PLATENG-1578", inst.Branches[0].Name)
+	assert.Equal(t, "feature/PROJ-1578", inst.Branches[0].Name)
 	assert.Equal(t, "org/api", inst.Branches[0].Repository.Name)
 	assert.Equal(t, "abc123d", inst.Branches[0].LastCommit.DisplayID)
 
@@ -699,13 +699,13 @@ func TestDevStatus_UnmarshalsAllEntityTypes(t *testing.T) {
 	require.NotNil(t, inst.Builds[0].TestSummary, "test summary present")
 	assert.Equal(t, 100, inst.Builds[0].TestSummary.PassedNumber)
 	require.Len(t, inst.Builds[0].References, 1)
-	assert.Equal(t, "refs/heads/feature/PLATENG-1578", inst.Builds[0].References[0].URI)
+	assert.Equal(t, "refs/heads/feature/PROJ-1578", inst.Builds[0].References[0].URI)
 }
 
-// devStatusObjectErrorsBody is the PLATENG-1417 regression fixture.
+// devStatusObjectErrorsBody is the PROJ-1417 regression fixture.
 // The Dev Status endpoint returned HTTP 200 with object-shaped entries
 // in the "errors" array instead of the empty array seen on
-// PLATENG-1573. Prior to the fix that retyped DevStatusResponse.Errors
+// PROJ-1573. Prior to the fix that retyped DevStatusResponse.Errors
 // to []json.RawMessage this body caused json.Unmarshal to fail with:
 //
 //	json: cannot unmarshal object into Go struct field
@@ -731,9 +731,9 @@ const devStatusObjectErrorsBody = `{
   ]
 }`
 
-// TestDevStatus_ObjectErrorsDoNotCrashUnmarshal is the PLATENG-1417
+// TestDevStatus_ObjectErrorsDoNotCrashUnmarshal is the PROJ-1417
 // regression test. A Dev Status response carrying JSON-object error
-// entries (rather than the empty array seen on PLATENG-1573 or the
+// entries (rather than the empty array seen on PROJ-1573 or the
 // historical string entries) must decode cleanly into
 // DevStatusResponse without crashing the unmarshal, because callers
 // rely on the rest of the response (Detail) to still be available even

@@ -39,7 +39,7 @@
 // summary blob and asked a "smart gate" which dataTypes to query,
 // skipping the ones the summary reported as zero-count. That
 // optimisation produced two silent-miss bugs in three commits
-// (PLATENG-1578 in particular: the summary said repository.count=1
+// (PROJ-1578 in particular: the summary said repository.count=1
 // and zero for every other dataType, but the Jira UI showed a PR,
 // branches, commits, and builds — all of which the gate silently
 // dropped, regardless of the summary's own "isStale":true flag).

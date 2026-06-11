@@ -368,7 +368,7 @@ filter can reconstruct any subset of the run's work:
 | Attribute | Meaning |
 | --------- | ------- |
 | `run_id` | Opaque short UID for this crawl invocation; on every line. |
-| `ticket_id` | Jira issue key (e.g. `PLATENG-1417`) — named to mirror Jira. Present on every line whose work concerns a specific issue. |
+| `ticket_id` | Jira issue key (e.g. `PROJ-1417`) — named to mirror Jira. Present on every line whose work concerns a specific issue. |
 | `span_id` / `parent_span_id` | Opaque short IDs per unit of work, linking each unit to whoever enqueued it. Opaque, not hierarchical, because crawls can bleed across projects or boards. |
 | `phase` | One of `fetch`, `parse`, `hierarchy_jql`, `dev_status`, `render`, `store`, `enqueue`. |
 | `trace_stream` | `response` (HTTP/data side, from the round-tripper) or `stream` (orchestration side, from the crawl). |
@@ -391,15 +391,15 @@ returned to library callers as `APICallCounts`, `APITimeByPhase`, and
 
 ```bash
 # All response-stream traces for one issue:
-gojira crawl PLATENG-1417 --log-level trace --log-format json 2>&1 \
-  | jq 'select(.trace_stream=="response" and .ticket_id=="PLATENG-1417")'
+gojira crawl PROJ-1417 --log-level trace --log-format json 2>&1 \
+  | jq 'select(.trace_stream=="response" and .ticket_id=="PROJ-1417")'
 
 # Only the per-phase measurement summary:
-gojira crawl PLATENG-1417 --log-level info --log-format json 2>&1 \
+gojira crawl PROJ-1417 --log-level info --log-format json 2>&1 \
   | jq 'select(.msg=="crawl.measurement")'
 
 # Reconstruct the fan-out tree (TRACE):
-gojira crawl PLATENG-1417 --log-level trace --log-format json 2>&1 \
+gojira crawl PROJ-1417 --log-level trace --log-format json 2>&1 \
   | jq 'select(.msg=="crawl.fanout") | "\(.discovered_from) -[\(.relation)]-> \(.ticket_id)"'
 ```
 
@@ -499,13 +499,13 @@ A minimal reference client ships at `cmd/gojira-client` for smoke-testing
 a running server. It is a reference tool, not a production front-end.
 
 ```bash
-go run ./cmd/gojira-client -address 127.0.0.1:50051 -classify PLATENG-1147
-go run ./cmd/gojira-client -address 127.0.0.1:50051 -key PLATENG-1147 -format markdown
-go run ./cmd/gojira-client -address 127.0.0.1:50051 -crawl PLATENG-1147
-go run ./cmd/gojira-client -address 127.0.0.1:50051 -create-project PLATENG -create-type Task -create-summary "New task" -dry-run
-go run ./cmd/gojira-client -address 127.0.0.1:50051 -comment PLATENG-1147 -comment-text "Looks good"
-go run ./cmd/gojira-client -address 127.0.0.1:50051 -transitions PLATENG-1147
-go run ./cmd/gojira-client -address 127.0.0.1:50051 -transition PLATENG-1147 -to-status "In Progress"
+go run ./cmd/gojira-client -address 127.0.0.1:50051 -classify PROJ-1147
+go run ./cmd/gojira-client -address 127.0.0.1:50051 -key PROJ-1147 -format markdown
+go run ./cmd/gojira-client -address 127.0.0.1:50051 -crawl PROJ-1147
+go run ./cmd/gojira-client -address 127.0.0.1:50051 -create-project PROJ -create-type Task -create-summary "New task" -dry-run
+go run ./cmd/gojira-client -address 127.0.0.1:50051 -comment PROJ-1147 -comment-text "Looks good"
+go run ./cmd/gojira-client -address 127.0.0.1:50051 -transitions PROJ-1147
+go run ./cmd/gojira-client -address 127.0.0.1:50051 -transition PROJ-1147 -to-status "In Progress"
 ```
 
 ### Regenerating the proto bindings

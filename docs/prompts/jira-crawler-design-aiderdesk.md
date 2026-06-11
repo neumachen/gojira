@@ -31,14 +31,14 @@ Design, and only if appropriate begin scaffolding, an idiomatic Go package/appli
 
 Example:
 
-`PLATENG-1147/index.md`
+`PROJ-1147/index.md`
 
 The broader goal is to create a durable Jira issue graph mirror where Jira issues, child work items, linked work items, remote links, pull request references, automation references, and body links are represented as local Markdown links/references when they are available through official APIs.
 
 CONTEXT:
 The desired runtime behavior is:
 
-1. Fetch a Jira issue such as `PLATENG-1147`.
+1. Fetch a Jira issue such as `PROJ-1147`.
 2. Fetch current Atlassian JSON API/schema information so the implementation can understand issue fields and rich content fields.
 3. Inspect the issue body and other relevant fields for Jira links.
 4. Discover child work items, linked work items, remote links, and other Jira-related links shown around the issue when available through official APIs.
@@ -65,7 +65,7 @@ The output model must distinguish between:
   - The source issue's Markdown should include a local Markdown reference to the downloaded Jira content.
   - The design should choose and justify a per-issue reference directory, such as:
 
-    `PLATENG-1147/references/`
+    `PROJ-1147/references/`
 
 - Non-Jira links:
   - These are not recursive crawl targets by default.
@@ -127,7 +127,7 @@ CONFIRMED REQUIREMENTS:
 - The design must be Go-oriented and idiomatic.
 - It must support a reusable package/API and may support a CLI/application.
 - It must use modern official Jira APIs.
-- It must start from issue key(s), such as `PLATENG-1147`.
+- It must start from issue key(s), such as `PROJ-1147`.
 - It must download the starting issue.
 - It must fetch current Atlassian JSON API/schema information.
 - It must discover Jira links in issue body/content.
@@ -234,7 +234,7 @@ TASKS:
 
 7. Markdown output strategy to document
    Include:
-   - `PLATENG-1147/index.md` example.
+   - `PROJ-1147/index.md` example.
    - A chosen per-issue reference directory, preferably `references/` unless repository conventions suggest otherwise.
    - Local links to downloaded Jira issues.
    - Reference-style links if recommended.
@@ -269,8 +269,8 @@ ACCEPTANCE CRITERIA:
 This pass is successful if:
 - The repository was inspected before edits.
 - A clear design document exists or is produced in chat if file edits are not appropriate.
-- The design explains how `PLATENG-1147` becomes `PLATENG-1147/index.md`.
-- The design proposes and justifies a per-issue reference directory such as `PLATENG-1147/references/`.
+- The design explains how `PROJ-1147` becomes `PROJ-1147/index.md`.
+- The design proposes and justifies a per-issue reference directory such as `PROJ-1147/references/`.
 - The design uses official/public Atlassian APIs and cites the relevant API families.
 - The design distinguishes OpenAPI schema, ADF schema, tenant-specific field metadata, and raw issue JSON.
 - The crawler design includes deduplication, cycle detection, rate-limit handling, pagination, and permission failure handling.

@@ -805,7 +805,7 @@ func numericIssueJSON(key, numericID string) []byte {
 }`, numericID, key, numericID, key))
 }
 
-// TestCrawl_DevStatusPartialFailure is the PLATENG-1417 regression
+// TestCrawl_DevStatusPartialFailure is the PROJ-1417 regression
 // test at the crawl-orchestrator layer. The DevStatusEnricher returns
 // partial data (one pull request) alongside a non-fatal joined error
 // (one of the per-dataType calls failed to unmarshal). The crawl

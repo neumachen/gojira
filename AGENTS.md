@@ -6,7 +6,7 @@ gojira is a Go package/application for recursively mirroring Jira issue graphs i
 
 The intended workflow is:
 
-1. Start from one or more Jira issue keys, such as `PLATENG-1147`.
+1. Start from one or more Jira issue keys, such as `PROJ-123`.
 2. Fetch the issue using official/public Atlassian APIs.
 3. Fetch or use current Atlassian API/schema information where appropriate.
 4. Parse Jira issue body content, rich text, relationships, remote links, and development metadata.
@@ -63,7 +63,7 @@ Canonical issue path:
 Example:
 
 ```text
-PLATENG-1147/index.md
+PROJ-123/index.md
 ```
 
 Per-issue references directory:

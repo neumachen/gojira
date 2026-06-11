@@ -6,7 +6,7 @@
 // run() / captureRun() so it exercises the same wiring real users see,
 // including the configuration cascade and the exitErr→exit-code
 // mapping.
-package main
+package cli
 
 import (
 	"context"

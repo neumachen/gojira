@@ -7,7 +7,7 @@
 // mode is rejected with a clear message, a bridge-mode startup with
 // no server address is rejected, and the serve path keeps stdout
 // pure (no log records leak into the protocol stream).
-package main
+package cli
 
 import (
 	"context"

@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"bytes"
@@ -21,7 +21,7 @@ import (
 // internal/grpc.Serve writes its "listening on" / "stopped" diagnostic
 // lines directly to os.Stderr (it intentionally takes no writer in its
 // signature). The cmd's captureRun helper captures only the
-// cli.Command's ErrWriter, so a test that needs to see those lines
+// urfave.Command's ErrWriter, so a test that needs to see those lines
 // must redirect os.Stderr itself. This helper exists for exactly that
 // case.
 func captureOSStderr(t *testing.T) func() string {

@@ -9,7 +9,7 @@
 //   - AC 18: Run summary written to stderr.
 //
 // All tests use httptest.Server (no live network) and t.TempDir() for output.
-package main
+package cli
 
 import (
 	"bytes"

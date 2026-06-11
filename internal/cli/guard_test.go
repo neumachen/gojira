@@ -7,7 +7,7 @@
 //
 // No live network — every pass case is backed by the shared writeServer
 // httptest fake from write_cmds_test.go.
-package main
+package cli
 
 import (
 	"context"

@@ -13,31 +13,31 @@
 // remains a property of the cmd wiring too: requireConfig and
 // loadServeConfig only write to the cli ErrWriter, and the only
 // post-Serve cmd output is the *exitErr mapping below.
-package main
+package cli
 
 import (
 	"context"
 	"os"
 	"sync/atomic"
 
-	cli "github.com/urfave/cli/v3"
+	urfave "github.com/urfave/cli/v3"
 
 	gojiramcp "github.com/neumachen/gojira/internal/mcp"
 )
 
-// mcpCommand returns the *cli.Command for "gojira mcp". The flag set
+// mcpCommand returns the *urfave.Command for "gojira mcp". The flag set
 // is intentionally the serve-style connection set so a single
 // configured environment drives crawl, serve, and mcp uniformly.
 // The signalled atomic is threaded so a SIGINT during a long-running
 // stdio session is observed and mapped consistently with the other
 // long-running command (serve).
-func mcpCommand(env map[string]string, signalled *atomic.Bool) *cli.Command {
-	return &cli.Command{
+func mcpCommand(env map[string]string, signalled *atomic.Bool) *urfave.Command {
+	return &urfave.Command{
 		Name:      "mcp",
 		Usage:     "Run the gojira MCP server over stdio",
 		ArgsUsage: " ", // no positional args
 		Flags:     serveFlags(env),
-		Action: func(ctx context.Context, cmd *cli.Command) error {
+		Action: func(ctx context.Context, cmd *urfave.Command) error {
 			return runMCP(ctx, cmd, env, signalled)
 		},
 	}
@@ -47,7 +47,7 @@ func mcpCommand(env map[string]string, signalled *atomic.Bool) *cli.Command {
 // structure: guard, load config cascade, hand off to the package's
 // encapsulated Serve. A clean signal-driven shutdown is already
 // nil-returned by [gojiramcp.Serve]; any real error maps to exit 1.
-func runMCP(ctx context.Context, cmd *cli.Command, env map[string]string, signalled *atomic.Bool) error {
+func runMCP(ctx context.Context, cmd *urfave.Command, env map[string]string, signalled *atomic.Bool) error {
 	_ = signalled // mirrored from runServe for API consistency; Serve treats ctx cancel as clean shutdown
 	stderr := cmd.Root().ErrWriter
 	if stderr == nil {

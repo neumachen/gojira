@@ -21,7 +21,7 @@ func TestNoopSink_EmitDoesNotPanic(t *testing.T) {
 	// populated Event
 	sink.Emit(events.Event{
 		Kind:     events.KindIssueFetched,
-		IssueKey: "PLATENG-1",
+		IssueKey: "PROJ-1",
 		Message:  "fetched",
 	})
 }

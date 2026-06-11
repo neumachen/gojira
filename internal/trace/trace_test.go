@@ -81,7 +81,7 @@ func TestNewRoot_HasFreshRunAndSpan_NoParent(t *testing.T) {
 func TestSpan_ChildLinksParent(t *testing.T) {
 	t.Parallel()
 	root := trace.NewRoot()
-	child := root.Child(trace.PhaseFetch, "PLATENG-1417", 1)
+	child := root.Child(trace.PhaseFetch, "PROJ-1417", 1)
 
 	if child.RunID != root.RunID {
 		t.Errorf("child.RunID must match root: got %q, want %q", child.RunID, root.RunID)
@@ -96,7 +96,7 @@ func TestSpan_ChildLinksParent(t *testing.T) {
 	if child.SpanID == root.SpanID {
 		t.Errorf("child.SpanID must be fresh, not equal to root.SpanID (%q)", root.SpanID)
 	}
-	if child.TicketID != "PLATENG-1417" {
+	if child.TicketID != "PROJ-1417" {
 		t.Errorf("child.TicketID: got %q", child.TicketID)
 	}
 	if child.Phase != trace.PhaseFetch {
@@ -183,7 +183,7 @@ func TestSpan_Logger_ChildAttachesAllAttrs(t *testing.T) {
 	base := captureLogger(&buf)
 
 	root := trace.NewRoot()
-	child := root.Child(trace.PhaseHierarchyJQL, "PLATENG-1417", 2)
+	child := root.Child(trace.PhaseHierarchyJQL, "PROJ-1417", 2)
 	child.Logger(base).Info("hello")
 
 	rec := decodeLastRecord(t, &buf)
@@ -192,7 +192,7 @@ func TestSpan_Logger_ChildAttachesAllAttrs(t *testing.T) {
 		trace.AttrRunID:        root.RunID,
 		trace.AttrSpanID:       child.SpanID,
 		trace.AttrParentSpanID: root.SpanID,
-		trace.AttrTicketID:     "PLATENG-1417",
+		trace.AttrTicketID:     "PROJ-1417",
 		trace.AttrPhase:        trace.PhaseHierarchyJQL,
 	}
 	for k, v := range want {

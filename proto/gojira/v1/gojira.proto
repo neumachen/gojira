@@ -122,7 +122,7 @@ enum OutputFormat {
 
 // GetIssueRequest identifies the issue to fetch and the desired output format.
 message GetIssueRequest {
-  // key is the Jira issue key, e.g. "PLATENG-1147".
+  // key is the Jira issue key, e.g. "PROJ-1147".
   string key = 1;
 
   // format selects the presentation format for the response.
@@ -169,7 +169,7 @@ message Issue {
   // issue_type is the display name of the issue type, e.g. "Story".
   string issue_type = 5;
 
-  // project is the Jira project key, e.g. "PLATENG".
+  // project is the Jira project key, e.g. "PROJ".
   string project = 6;
 
   // assignee is the display name of the assignee, or empty if unassigned.
@@ -374,7 +374,7 @@ message Reference {
 // It mirrors a subset of the crawl knobs available via internal/config.
 message CrawlRequest {
   // start_keys is the list of Jira issue keys to start crawling from,
-  // e.g. ["PLATENG-1147"].
+  // e.g. ["PROJ-1147"].
   repeated string start_keys = 1;
 
   // depth_limit is the maximum recursion depth. 0 means unlimited.

@@ -29,7 +29,7 @@ PROJECT CONTEXT:
 The application/package to be built is a Go-style Jira crawler/mirroring tool.
 
 Core intended behavior:
-1. Start from one or more Jira issue keys, for example `PLATENG-1147`.
+1. Start from one or more Jira issue keys, for example `PROJ-1147`.
 2. Fetch the issue using the most modern official Jira API available.
 3. Fetch current Atlassian API/schema information where appropriate.
 4. Parse Jira issue bodies/rich content and relationships.
@@ -49,7 +49,7 @@ Core intended behavior:
 
    Example:
 
-   `PLATENG-1147/index.md`
+   `PROJ-1147/index.md`
 
 10. Use a per-issue reference directory, likely:
 

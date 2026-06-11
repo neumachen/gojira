@@ -566,7 +566,7 @@ func (c *crawler) processIssue(item workItem) error {
 	// (application, dataType) pair is queried unconditionally — there
 	// is no per-issue gate. The customfield_10000 summary blob was
 	// historically used to skip dataTypes whose count was zero, but
-	// that optimisation produced two silent-miss bugs (PLATENG-1578
+	// that optimisation produced two silent-miss bugs (PROJ-1578
 	// most notably) where a stale-cached summary suppressed calls
 	// that would have surfaced real entities. The simpler "always
 	// call" contract costs at most five extra HTTP requests per

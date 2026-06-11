@@ -401,7 +401,7 @@ func (c *Client) ListFields(ctx context.Context) ([]Field, error) {
 // per-error entry shape is not guaranteed stable: production responses
 // have been observed carrying both string entries (older tenants) and
 // JSON objects with shape `{"code": <int>, "message": <string>,
-// "userId": <string>, ...}` (newer tenants — observed on PLATENG-1417
+// "userId": <string>, ...}` (newer tenants — observed on PROJ-1417
 // for dataType=commit and dataType=build). Modelling Errors as a typed
 // slice against a single observed shape would break the unmarshal as
 // soon as the other shape appears. [json.RawMessage] accepts any valid

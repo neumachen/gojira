@@ -10,7 +10,7 @@ import "context"
 // retain the content after Write returns.
 //
 // Write persists the rendered Markdown for a single issue:
-//   - key:        Jira issue key (e.g. "PLATENG-1147").
+//   - key:        Jira issue key (e.g. "PROJ-1147").
 //   - indexMD:    content for <key>/index.md.
 //   - outboundMD: content for <key>/references/outbound.md.
 //     An empty string means no outbound file is written, but

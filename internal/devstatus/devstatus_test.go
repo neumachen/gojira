@@ -149,7 +149,7 @@ func prResponse(url, title, status, repo string) client.DevStatusResponse {
 
 func baseIssue(numericID string) parse.Issue {
 	return parse.Issue{
-		Key:       "PLATENG-1573",
+		Key:       "PROJ-1573",
 		NumericID: numericID,
 	}
 }
@@ -194,7 +194,7 @@ func TestEnricher_DefaultOff(t *testing.T) {
 // available, every configured (application, dataType) pair is queried,
 // regardless of what (if anything) the customfield_10000 summary blob
 // reports. This is the explicit reversal of the smart-gate behaviour
-// that produced two silent-miss bugs (PLATENG-1578 in particular).
+// that produced two silent-miss bugs (PROJ-1578 in particular).
 //
 // The cases enumerate the four classes of summary state the old gate
 // branched on; the new contract collapses them all to "query every

@@ -100,7 +100,7 @@ type Event struct {
 	Timestamp time.Time
 
 	// IssueKey is the Jira issue key associated with this event, e.g.
-	// "PLATENG-1147". Empty when the event is not issue-specific.
+	// "PROJ-1147". Empty when the event is not issue-specific.
 	IssueKey string
 
 	// Message is a human-readable description of the event.

@@ -40,8 +40,8 @@ func assertPerm(t *testing.T, path string, want os.FileMode) {
 // and that directory permissions are 0755 and file permissions are 0644.
 func TestWrite_NewIssue(t *testing.T) {
 	dir := t.TempDir()
-	const key = "PLATENG-1147"
-	const indexContent = "# PLATENG-1147 — My Issue\n"
+	const key = "PROJ-1147"
+	const indexContent = "# PROJ-1147 — My Issue\n"
 	const outboundContent = "## Outbound references\n"
 
 	require.NoError(t, output.Write(dir, key, indexContent, outboundContent, false), "Write")
@@ -175,8 +175,8 @@ func TestWrite_RejectKeyWithBackslash(t *testing.T) {
 
 // TestIssueDir asserts that IssueDir returns the expected canonical path.
 func TestIssueDir(t *testing.T) {
-	got := output.IssueDir("/tmp/out", "PLATENG-1147")
-	assert.Equal(t, "/tmp/out/PLATENG-1147", got, "IssueDir")
+	got := output.IssueDir("/tmp/out", "PROJ-1147")
+	assert.Equal(t, "/tmp/out/PROJ-1147", got, "IssueDir")
 }
 
 // TestWrite_DirectoryCreation asserts that Write creates the full

@@ -85,11 +85,12 @@ func TestMCP_ModeInvalid_FailsWithEnumMessage(t *testing.T) {
 // (d) Bridge mode startup mentions the dial target on stderr
 // ---------------------------------------------------------------------------
 //
-// resolveServerAddress falls back to 127.0.0.1:50051 (matching the serve
-// command's default bind), so an unset address is NOT a hard error — it
-// is the documented "local loopback gojira serve" topology. What we DO
-// require is that the startup diagnostic line tells the operator where
-// the bridge will dial, so an unintended default is easy to spot.
+// cfg.ServerAddress defaults to 127.0.0.1:50051 via the config cascade
+// (matching the serve command's default bind), so an unset address is
+// NOT a hard error — it is the documented "local loopback gojira serve"
+// topology. What we DO require is that the startup diagnostic line tells
+// the operator where the bridge will dial, so an unintended default is
+// easy to spot.
 func TestMCP_BridgeMode_StartupLineNamesAddress(t *testing.T) {
 	neutralizeXDG(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)

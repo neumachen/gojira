@@ -129,6 +129,7 @@ func allEnvKeys() []string {
 		"GOJIRA_CRAWL_EMIT_GRAPH",
 		"GOJIRA_MCP_MODE",
 		"GOJIRA_MCP_ALLOW_WRITES",
+		"GOJIRA_SERVER_ADDRESS",
 	}
 	// Deprecated v0.1 flat aliases — sourced from the config package
 	// so the table is the single source of truth.
@@ -650,6 +651,7 @@ func configToKV(cfg gojira.Config) map[string]string {
 		"GOJIRA_EMIT_GRAPH":                bool01(cfg.EmitGraph),
 		"GOJIRA_MCP_MODE":                  cfg.MCPMode,
 		"GOJIRA_MCP_ALLOW_WRITES":          bool01(cfg.MCPAllowWrites),
+		"GOJIRA_SERVER_ADDRESS":            cfg.ServerAddress,
 	}
 }
 
@@ -747,6 +749,12 @@ func buildConfigKV(cmd *cli.Command) map[string]string {
 		} else {
 			kv["GOJIRA_EMIT_GRAPH"] = "false"
 		}
+	}
+	// --address is declared only by the serve and mcp subcommands;
+	// urfave/cli/v3 IsSet returns false for any unknown flag, so this
+	// is safe to call from crawl too.
+	if cmd.IsSet("address") {
+		kv["GOJIRA_SERVER_ADDRESS"] = cmd.String("address")
 	}
 
 	return kv

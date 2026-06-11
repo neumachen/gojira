@@ -229,6 +229,11 @@ type Config struct {
 	// the server's tools/list response. Sourced from
 	// GOJIRA_MCP_ALLOW_WRITES. Default: false.
 	MCPAllowWrites bool `env:"GOJIRA_MCP_ALLOW_WRITES,default=false"`
+
+	// ServerAddress is the gRPC server bind address (e.g. "127.0.0.1:50051").
+	// Sourced from GOJIRA_SERVER_ADDRESS or the "server.address" YAML key.
+	// Default: 127.0.0.1:50051 (loopback; see DefaultServerSettings).
+	ServerAddress string `env:"GOJIRA_SERVER_ADDRESS,default=127.0.0.1:50051"`
 }
 
 // validLogLevels is the set of accepted GOJIRA_LOG_LEVEL values. The
@@ -537,6 +542,8 @@ func envKeyForField(field string) string {
 		return "GOJIRA_MCP_MODE"
 	case "MCPAllowWrites":
 		return "GOJIRA_MCP_ALLOW_WRITES"
+	case "ServerAddress":
+		return "GOJIRA_SERVER_ADDRESS"
 	default:
 		return field
 	}

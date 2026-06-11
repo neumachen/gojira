@@ -1,7 +1,7 @@
 // bridge_backend_test.go — exercise the gRPC bridge backend against
-// an in-process grpcserver wired over a bufconn listener. No real
+// an in-process grpc wired over a bufconn listener. No real
 // network: bufconn provides an in-memory net.Listener pair and the
-// grpcserver's WithXFunc seams stand in for the live facade.
+// grpc's WithXFunc seams stand in for the live facade.
 package mcpserver
 
 import (
@@ -23,7 +23,7 @@ import (
 	gojirav1 "github.com/neumachen/gojira/gen/gojira/v1"
 	"github.com/neumachen/gojira/internal/events"
 	"github.com/neumachen/gojira/internal/extract"
-	"github.com/neumachen/gojira/internal/grpcserver"
+	gojiragrpc "github.com/neumachen/gojira/internal/grpc"
 	"github.com/neumachen/gojira/internal/parse"
 	"github.com/neumachen/gojira/pkg/classify"
 	"github.com/neumachen/gojira/pkg/client"
@@ -46,15 +46,15 @@ func dialBufconn(t *testing.T, lis *bufconn.Listener) *grpc.ClientConn {
 	return conn
 }
 
-// startBridgeBufconnServer brings up a grpcserver.Server with the
+// startBridgeBufconnServer brings up a gojiragrpc.Server with the
 // supplied options on a fresh bufconn listener and returns a
 // bridgeBackend dialed against it. opts are forwarded so each test
 // can inject its own per-RPC fakes via the existing WithXFunc seams.
-func startBridgeBufconnServer(t *testing.T, opts ...grpcserver.Option) *bridgeBackend {
+func startBridgeBufconnServer(t *testing.T, opts ...gojiragrpc.Option) *bridgeBackend {
 	t.Helper()
 	const bufSize = 1024 * 1024
 	lis := bufconn.Listen(bufSize)
-	srv := grpcserver.NewServer(gojira.Config{
+	srv := gojiragrpc.NewServer(gojira.Config{
 		Site:      "https://example.atlassian.net",
 		OutputDir: t.TempDir(),
 	}, opts...)
@@ -87,7 +87,7 @@ func startBridgeBufconnServer(t *testing.T, opts ...grpcserver.Option) *bridgeBa
 
 func TestBridgeBackend_Classify(t *testing.T) {
 	// Classify is a server-side pure function over its input; no fake
-	// needed beyond the running grpcserver.
+	// needed beyond the running gojiragrpc.
 	b := startBridgeBufconnServer(t)
 	res, err := b.Classify(context.Background(), "https://example.atlassian.net/browse/PROJ-1", "")
 	require.NoError(t, err)
@@ -97,7 +97,7 @@ func TestBridgeBackend_Classify(t *testing.T) {
 
 func TestBridgeBackend_GetIssue(t *testing.T) {
 	b := startBridgeBufconnServer(t,
-		grpcserver.WithGetIssueFunc(func(_ context.Context, _ gojira.Config, key string) (parse.Issue, []extract.Reference, error) {
+		gojiragrpc.WithGetIssueFunc(func(_ context.Context, _ gojira.Config, key string) (parse.Issue, []extract.Reference, error) {
 			return parse.Issue{
 				Key:       key,
 				Summary:   "from grpc",
@@ -115,7 +115,7 @@ func TestBridgeBackend_GetIssue(t *testing.T) {
 
 func TestBridgeBackend_Crawl_TranslatesStreamToProgressAndSummary(t *testing.T) {
 	b := startBridgeBufconnServer(t,
-		grpcserver.WithCrawlFunc(func(_ context.Context, _ gojira.Config, keys []string, sink gojira.Sink) (gojira.Summary, error) {
+		gojiragrpc.WithCrawlFunc(func(_ context.Context, _ gojira.Config, keys []string, sink gojira.Sink) (gojira.Summary, error) {
 			now := time.Now()
 			for _, k := range keys {
 				sink.Emit(events.Event{
@@ -141,7 +141,7 @@ func TestBridgeBackend_Crawl_TranslatesStreamToProgressAndSummary(t *testing.T) 
 
 func TestBridgeBackend_GetGraph_ForwardsAndDrivesProgress(t *testing.T) {
 	b := startBridgeBufconnServer(t,
-		grpcserver.WithCrawlGraphFunc(func(_ context.Context, _ gojira.Config, keys []string, _ gojira.Sink) (gojira.Summary, gojira.GraphModel, error) {
+		gojiragrpc.WithCrawlGraphFunc(func(_ context.Context, _ gojira.Config, keys []string, _ gojira.Sink) (gojira.Summary, gojira.GraphModel, error) {
 			return gojira.Summary{Fetched: 1}, gojira.GraphModel{
 				Nodes: []gojira.GraphNode{{ID: "PROJ-1", Kind: "issue", Label: "PROJ-1", Fetched: true}},
 				Edges: []gojira.GraphEdge{},
@@ -160,7 +160,7 @@ func TestBridgeBackend_GetGraph_ForwardsAndDrivesProgress(t *testing.T) {
 
 func TestBridgeBackend_CreateIssue_Forwards(t *testing.T) {
 	b := startBridgeBufconnServer(t,
-		grpcserver.WithCreateIssueFunc(func(_ context.Context, _ gojira.Config, project, issueType string, opts ...client.CreateOption) (client.CreatedIssue, error) {
+		gojiragrpc.WithCreateIssueFunc(func(_ context.Context, _ gojira.Config, project, issueType string, opts ...client.CreateOption) (client.CreatedIssue, error) {
 			assert.Equal(t, "PROJ", project)
 			assert.Equal(t, "Task", issueType)
 			return client.CreatedIssue{Key: "PROJ-99", ID: "10099", Self: "https://x/jira/PROJ-99"}, nil
@@ -173,7 +173,7 @@ func TestBridgeBackend_CreateIssue_Forwards(t *testing.T) {
 
 func TestBridgeBackend_ListTransitions_Forwards(t *testing.T) {
 	b := startBridgeBufconnServer(t,
-		grpcserver.WithListTransitionsFunc(func(_ context.Context, _ gojira.Config, key string) ([]client.Transition, error) {
+		gojiragrpc.WithListTransitionsFunc(func(_ context.Context, _ gojira.Config, key string) ([]client.Transition, error) {
 			return []client.Transition{{ID: "11", Name: "Start", ToStatus: "In Progress"}}, nil
 		}),
 	)

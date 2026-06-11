@@ -1,6 +1,6 @@
-// Package grpcserver provides gRPC server-side adapters for the gojira
+// Package grpc provides gRPC server-side adapters for the gojira
 // library interfaces.
-package grpcserver
+package grpc
 
 import (
 	"google.golang.org/grpc"

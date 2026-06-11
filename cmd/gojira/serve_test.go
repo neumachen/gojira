@@ -1,14 +1,59 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// captureOSStderr replaces os.Stderr with a pipe for the duration of
+// the test and returns a function that restores the original and
+// returns whatever was written to the pipe during the redirection.
+//
+// internal/grpc.Serve writes its "listening on" / "stopped" diagnostic
+// lines directly to os.Stderr (it intentionally takes no writer in its
+// signature). The cmd's captureRun helper captures only the
+// cli.Command's ErrWriter, so a test that needs to see those lines
+// must redirect os.Stderr itself. This helper exists for exactly that
+// case.
+func captureOSStderr(t *testing.T) func() string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	orig := os.Stderr
+	os.Stderr = w
+
+	var (
+		mu  sync.Mutex
+		buf bytes.Buffer
+		wg  sync.WaitGroup
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		mu.Lock()
+		defer mu.Unlock()
+		_, _ = io.Copy(&buf, r)
+	}()
+
+	return func() string {
+		_ = w.Close()
+		wg.Wait()
+		os.Stderr = orig
+		_ = r.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		return buf.String()
+	}
+}
 
 // serveEnv returns the minimal valid environment the serve subcommand
 // needs to clear gojira.LoadConfig's required-field validation.
@@ -24,8 +69,8 @@ func serveEnv(t *testing.T) map[string]string {
 
 // TestRun_Serve_CleanShutdown drives `gojira serve` with a context that
 // cancels shortly after start-up. The expected lifecycle is:
-//   - serveUntilDone reads ctx.Done(), calls grpcServer.GracefulStop(),
-//   - Serve returns nil, runServe returns nil,
+//   - internal/grpc.Serve reads ctx.Done(), calls GracefulStop(),
+//   - grpc.Serve returns nil, runServe returns nil,
 //   - run() observes ctx.Err() != nil but the subcommand returned cleanly:
 //     the test waits on the same context, so we just verify the binary
 //     produced the "listening on" line and shut down without a panic.
@@ -36,14 +81,22 @@ func serveEnv(t *testing.T) map[string]string {
 func TestRun_Serve_CleanShutdown(t *testing.T) {
 	env := serveEnv(t)
 
+	// internal/grpc.Serve writes the bound-address and stopped lines
+	// directly to os.Stderr; capture that stream alongside the cmd's
+	// own ErrWriter so the assertions can see both surfaces.
+	stopCapture := captureOSStderr(t)
+
 	// 150ms is well within the urfave/cli + grpc.NewServer startup
 	// budget on every supported platform and short enough to keep the
 	// suite fast.
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
 
-	_, stderr, code := captureRun(ctx,
+	_, cmdStderr, code := captureRun(ctx,
 		[]string{"gojira", "serve", "--address", "127.0.0.1:0"}, env)
+
+	osStderr := stopCapture()
+	stderr := cmdStderr + osStderr
 
 	// A clean signal-driven shutdown of a long-running server is
 	// success: runServe returns nil. run()'s post-action exit-code

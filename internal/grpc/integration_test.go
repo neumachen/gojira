@@ -1,12 +1,12 @@
-// In-process gRPC integration test for the grpcserver package.
+// In-process gRPC integration test for the grpc package.
 //
 // It wires the real handlers behind a bufconn listener and a real
 // grpc.Server + grpc.ClientConn, so the full Classify / GetIssue /
 // Crawl code path — request unmarshalling, status mapping, streaming —
 // runs end to end without binding a real port or touching the network.
-// Fakes injected through [grpcserver.WithGetIssueFunc] and
-// [grpcserver.WithCrawlFunc] replace the live Jira call sites.
-package grpcserver_test
+// Fakes injected through [gojiragrpc.WithGetIssueFunc] and
+// [gojiragrpc.WithCrawlFunc] replace the live Jira call sites.
+package grpc_test
 
 import (
 	"context"
@@ -28,7 +28,7 @@ import (
 	gojirav1 "github.com/neumachen/gojira/gen/gojira/v1"
 	"github.com/neumachen/gojira/internal/events"
 	"github.com/neumachen/gojira/internal/extract"
-	"github.com/neumachen/gojira/internal/grpcserver"
+	gojiragrpc "github.com/neumachen/gojira/internal/grpc"
 	"github.com/neumachen/gojira/internal/parse"
 	"github.com/neumachen/gojira/pkg/classify"
 	"github.com/neumachen/gojira/pkg/client"
@@ -44,7 +44,7 @@ const bufnetTarget = "passthrough:///bufnet"
 // in-memory bufconn listener, starts grpc.Server.Serve in a goroutine,
 // dials a matching client connection, and registers cleanup callbacks
 // so the listener and server are torn down at test end.
-func startBufconnServer(t *testing.T, srv *grpcserver.Server) gojirav1.GojiraClient {
+func startBufconnServer(t *testing.T, srv *gojiragrpc.Server) gojirav1.GojiraClient {
 	t.Helper()
 	const bufSize = 1024 * 1024
 	lis := bufconn.Listen(bufSize)
@@ -131,7 +131,7 @@ func integrationFixtureIssue() (parse.Issue, []extract.Reference) {
 
 func TestIntegration_Classify(t *testing.T) {
 	t.Parallel()
-	srv := grpcserver.NewServer(integrationCfg(t))
+	srv := gojiragrpc.NewServer(integrationCfg(t))
 	client := startBufconnServer(t, srv)
 
 	resp, err := client.Classify(context.Background(), &gojirav1.ClassifyRequest{
@@ -156,9 +156,9 @@ func TestIntegration_GetIssue_AllFormats(t *testing.T) {
 	t.Parallel()
 	issue, refs := integrationFixtureIssue()
 
-	srv := grpcserver.NewServer(
+	srv := gojiragrpc.NewServer(
 		integrationCfg(t),
-		grpcserver.WithGetIssueFunc(func(_ context.Context, _ gojira.Config, key string) (parse.Issue, []extract.Reference, error) {
+		gojiragrpc.WithGetIssueFunc(func(_ context.Context, _ gojira.Config, key string) (parse.Issue, []extract.Reference, error) {
 			if key != "EXAMPLE-1" {
 				t.Errorf("getIssueFn key: got %q, want EXAMPLE-1", key)
 			}
@@ -240,9 +240,9 @@ func TestIntegration_GetIssue_AllFormats(t *testing.T) {
 func TestIntegration_Crawl_StreamsEvents(t *testing.T) {
 	t.Parallel()
 
-	srv := grpcserver.NewServer(
+	srv := gojiragrpc.NewServer(
 		integrationCfg(t),
-		grpcserver.WithCrawlFunc(func(_ context.Context, _ gojira.Config, startKeys []string, sink gojira.Sink) (gojira.Summary, error) {
+		gojiragrpc.WithCrawlFunc(func(_ context.Context, _ gojira.Config, startKeys []string, sink gojira.Sink) (gojira.Summary, error) {
 			if len(startKeys) != 1 || startKeys[0] != "EXAMPLE-1" {
 				t.Errorf("startKeys: got %v, want [EXAMPLE-1]", startKeys)
 			}
@@ -315,8 +315,8 @@ func TestIntegration_CreateIssue(t *testing.T) {
 
 	var gotProject, gotIssueType string
 	var called bool
-	srv := grpcserver.NewServer(integrationCfg(t),
-		grpcserver.WithCreateIssueFunc(func(_ context.Context, _ gojira.Config, project, issueType string, _ ...client.CreateOption) (client.CreatedIssue, error) {
+	srv := gojiragrpc.NewServer(integrationCfg(t),
+		gojiragrpc.WithCreateIssueFunc(func(_ context.Context, _ gojira.Config, project, issueType string, _ ...client.CreateOption) (client.CreatedIssue, error) {
 			called = true
 			gotProject = project
 			gotIssueType = issueType
@@ -359,8 +359,8 @@ func TestIntegration_CreateIssue_DryRun(t *testing.T) {
 	t.Parallel()
 
 	var called bool
-	srv := grpcserver.NewServer(integrationCfg(t),
-		grpcserver.WithCreateIssueFunc(func(context.Context, gojira.Config, string, string, ...client.CreateOption) (client.CreatedIssue, error) {
+	srv := gojiragrpc.NewServer(integrationCfg(t),
+		gojiragrpc.WithCreateIssueFunc(func(context.Context, gojira.Config, string, string, ...client.CreateOption) (client.CreatedIssue, error) {
 			called = true
 			return client.CreatedIssue{}, nil
 		}),
@@ -395,8 +395,8 @@ func TestIntegration_UpdateIssue(t *testing.T) {
 	t.Parallel()
 
 	var gotKey string
-	srv := grpcserver.NewServer(integrationCfg(t),
-		grpcserver.WithUpdateIssueFunc(func(_ context.Context, _ gojira.Config, key string, _ ...client.UpdateOption) error {
+	srv := gojiragrpc.NewServer(integrationCfg(t),
+		gojiragrpc.WithUpdateIssueFunc(func(_ context.Context, _ gojira.Config, key string, _ ...client.UpdateOption) error {
 			gotKey = key
 			return nil
 		}),
@@ -421,8 +421,8 @@ func TestIntegration_UpdateIssue(t *testing.T) {
 func TestIntegration_AddComment(t *testing.T) {
 	t.Parallel()
 
-	srv := grpcserver.NewServer(integrationCfg(t),
-		grpcserver.WithAddCommentFunc(func(context.Context, gojira.Config, string, ...client.CommentOption) (client.Comment, error) {
+	srv := gojiragrpc.NewServer(integrationCfg(t),
+		gojiragrpc.WithAddCommentFunc(func(context.Context, gojira.Config, string, ...client.CommentOption) (client.Comment, error) {
 			return client.Comment{
 				ID:                "10",
 				AuthorAccountID:   "acc-1",
@@ -454,8 +454,8 @@ func TestIntegration_AddComment(t *testing.T) {
 func TestIntegration_ListTransitions(t *testing.T) {
 	t.Parallel()
 
-	srv := grpcserver.NewServer(integrationCfg(t),
-		grpcserver.WithListTransitionsFunc(func(context.Context, gojira.Config, string) ([]client.Transition, error) {
+	srv := gojiragrpc.NewServer(integrationCfg(t),
+		gojiragrpc.WithListTransitionsFunc(func(context.Context, gojira.Config, string) ([]client.Transition, error) {
 			return []client.Transition{
 				{ID: "11", Name: "Start", ToStatus: "In Progress"},
 				{ID: "21", Name: "Done", ToStatus: "Done"},
@@ -484,8 +484,8 @@ func TestIntegration_TransitionIssue_ByID(t *testing.T) {
 	t.Parallel()
 
 	var gotKey, gotID string
-	srv := grpcserver.NewServer(integrationCfg(t),
-		grpcserver.WithTransitionIssueFunc(func(_ context.Context, _ gojira.Config, key, transitionID string, _ ...client.TransitionOption) error {
+	srv := gojiragrpc.NewServer(integrationCfg(t),
+		gojiragrpc.WithTransitionIssueFunc(func(_ context.Context, _ gojira.Config, key, transitionID string, _ ...client.TransitionOption) error {
 			gotKey = key
 			gotID = transitionID
 			return nil
@@ -516,14 +516,14 @@ func TestIntegration_TransitionIssue_ByStatus(t *testing.T) {
 	t.Parallel()
 
 	var transitionedWith string
-	srv := grpcserver.NewServer(integrationCfg(t),
-		grpcserver.WithListTransitionsFunc(func(context.Context, gojira.Config, string) ([]client.Transition, error) {
+	srv := gojiragrpc.NewServer(integrationCfg(t),
+		gojiragrpc.WithListTransitionsFunc(func(context.Context, gojira.Config, string) ([]client.Transition, error) {
 			return []client.Transition{
 				{ID: "11", Name: "Start", ToStatus: "In Progress"},
 				{ID: "21", Name: "Done", ToStatus: "Done"},
 			}, nil
 		}),
-		grpcserver.WithTransitionIssueFunc(func(_ context.Context, _ gojira.Config, _, transitionID string, _ ...client.TransitionOption) error {
+		gojiragrpc.WithTransitionIssueFunc(func(_ context.Context, _ gojira.Config, _, transitionID string, _ ...client.TransitionOption) error {
 			transitionedWith = transitionID
 			return nil
 		}),
@@ -559,8 +559,8 @@ func TestIntegration_Write_ErrorMapping(t *testing.T) {
 		// The seam returns the real client.ErrBadRequest sentinel so the
 		// server's toStatusError sees it (via errors.Is over the wrap
 		// chain) and maps it to codes.InvalidArgument over the wire.
-		srv := grpcserver.NewServer(integrationCfg(t),
-			grpcserver.WithCreateIssueFunc(func(context.Context, gojira.Config, string, string, ...client.CreateOption) (client.CreatedIssue, error) {
+		srv := gojiragrpc.NewServer(integrationCfg(t),
+			gojiragrpc.WithCreateIssueFunc(func(context.Context, gojira.Config, string, string, ...client.CreateOption) (client.CreatedIssue, error) {
 				return client.CreatedIssue{}, client.ErrBadRequest
 			}),
 		)
@@ -583,8 +583,8 @@ func TestIntegration_Write_ErrorMapping(t *testing.T) {
 
 	t.Run("TransitionIssue ErrConflict -> FailedPrecondition", func(t *testing.T) {
 		t.Parallel()
-		srv := grpcserver.NewServer(integrationCfg(t),
-			grpcserver.WithTransitionIssueFunc(func(context.Context, gojira.Config, string, string, ...client.TransitionOption) error {
+		srv := gojiragrpc.NewServer(integrationCfg(t),
+			gojiragrpc.WithTransitionIssueFunc(func(context.Context, gojira.Config, string, string, ...client.TransitionOption) error {
 				return client.ErrConflict
 			}),
 		)
@@ -614,9 +614,9 @@ func TestIntegration_Write_ErrorMapping(t *testing.T) {
 func TestIntegration_GetGraph_RoundTrip(t *testing.T) {
 	t.Parallel()
 
-	srv := grpcserver.NewServer(
+	srv := gojiragrpc.NewServer(
 		integrationCfg(t),
-		grpcserver.WithCrawlGraphFunc(func(_ context.Context, _ gojira.Config, startKeys []string, _ gojira.Sink) (gojira.Summary, gojira.GraphModel, error) {
+		gojiragrpc.WithCrawlGraphFunc(func(_ context.Context, _ gojira.Config, startKeys []string, _ gojira.Sink) (gojira.Summary, gojira.GraphModel, error) {
 			if len(startKeys) != 1 || startKeys[0] != "EXAMPLE-1" {
 				t.Errorf("startKeys: got %v, want [EXAMPLE-1]", startKeys)
 			}

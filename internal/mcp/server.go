@@ -1,17 +1,17 @@
-package mcpserver
+package mcp
 
 // SDK symbols locked from `go doc github.com/modelcontextprotocol/go-sdk/mcp`
 // at v1.6.1 (commit verified against go.sum). Future maintainers should
 // re-run `go doc` after any SDK bump and re-verify these signatures.
 //
-//   mcp.NewServer(impl *Implementation, options *ServerOptions) *Server
-//   mcp.AddTool[In, Out any](s *Server, t *Tool, h ToolHandlerFor[In, Out])
+//   mcpsdk.NewServer(impl *Implementation, options *ServerOptions) *Server
+//   mcpsdk.AddTool[In, Out any](s *Server, t *Tool, h ToolHandlerFor[In, Out])
 //     where ToolHandlerFor[In, Out any] =
 //           func(context.Context, *CallToolRequest, In) (*CallToolResult, Out, error)
 //   (*Server).Run(ctx context.Context, t Transport) error
 //   (*Server).Connect(ctx, Transport, *ServerSessionOptions) (*ServerSession, error)
-//   mcp.NewInMemoryTransports() (*InMemoryTransport, *InMemoryTransport)
-//   mcp.NewClient(impl *Implementation, opts *ClientOptions) *Client
+//   mcpsdk.NewInMemoryTransports() (*InMemoryTransport, *InMemoryTransport)
+//   mcpsdk.NewClient(impl *Implementation, opts *ClientOptions) *Client
 //   (*Client).Connect(ctx, Transport, *ClientSessionOptions) (*ClientSession, error)
 //   (*ClientSession).ListTools(ctx, *ListToolsParams) (*ListToolsResult, error)
 //   (*ClientSession).CallTool(ctx, *CallToolParams) (*CallToolResult, error)
@@ -19,7 +19,7 @@ package mcpserver
 //   CallToolRequest = ServerRequest[*CallToolParamsRaw]
 //     req.Params.GetProgressToken() any  — nil when client did not supply one
 //     req.Session *ServerSession
-//   mcp.StdioTransport — concrete struct, instantiate with &mcp.StdioTransport{}
+//   mcpsdk.StdioTransport — concrete struct, instantiate with &mcpsdk.StdioTransport{}
 //
 // Progress / Errors:
 //   - Tool handler returning a non-nil error is auto-wrapped into a
@@ -32,7 +32,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/neumachen/gojira"
 )
@@ -46,13 +46,13 @@ const ModeSelf = "self"
 // the App.ServerSettings cascade).
 const ModeBridge = "bridge"
 
-// NewMCPServer constructs an [*mcp.Server] for the gojira MCP surface.
-// It calls mcp.NewServer with an Implementation identifying the server
+// NewMCPServer constructs an [*mcpsdk.Server] for the gojira MCP surface.
+// It calls mcpsdk.NewServer with an Implementation identifying the server
 // and version, then registers tools via [registerTools]. The read
 // tools are always present; the four write tools are only registered
 // when allowWrites is true.
-func NewMCPServer(b mcpBackend, allowWrites bool) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{
+func NewMCPServer(b mcpBackend, allowWrites bool) *mcpsdk.Server {
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    "gojira",
 		Version: gojira.Version,
 	}, nil)
@@ -83,17 +83,18 @@ func NewBackend(cfg gojira.Config, mode, serverAddr string) (mcpBackend, func() 
 		}
 		return bb, closer, nil
 	case "":
-		return nil, nil, errors.New("mcpserver: mode is required (self|bridge)")
+		return nil, nil, errors.New("mcp: mode is required (self|bridge)")
 	default:
-		return nil, nil, fmt.Errorf("mcpserver: unknown mode %q (expected self|bridge)", mode)
+		return nil, nil, fmt.Errorf("mcp: unknown mode %q (expected self|bridge)", mode)
 	}
 }
 
-// Serve runs the supplied MCP server over the stdio transport until
+// runStdio runs the supplied MCP server over the stdio transport until
 // ctx is cancelled or stdin is closed. It is a thin wrapper over
-// (*mcp.Server).Run with the concrete *mcp.StdioTransport — kept as
-// a one-liner so the cmd layer can mock it or replace the transport
-// for tests without re-implementing the run loop.
-func Serve(ctx context.Context, s *mcp.Server) error {
-	return s.Run(ctx, &mcp.StdioTransport{})
+// (*mcpsdk.Server).Run with the concrete *mcpsdk.StdioTransport — kept as
+// an unexported one-liner so the package's public [Serve] entry point
+// (serve.go) and tests can mock it or replace the transport without
+// re-implementing the run loop.
+func runStdio(ctx context.Context, s *mcpsdk.Server) error {
+	return s.Run(ctx, &mcpsdk.StdioTransport{})
 }

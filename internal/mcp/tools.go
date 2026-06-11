@@ -1,4 +1,4 @@
-package mcpserver
+package mcp
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/neumachen/gojira"
 )
@@ -78,13 +78,13 @@ type transitionIssueIn struct {
 // update_issue, add_comment, transition_issue) are registered only
 // when allowWrites is true. Disabled write tools are ABSENT from
 // tools/list — they do not appear as stubs that error on call.
-func registerTools(server *mcp.Server, b mcpBackend, allowWrites bool) {
-	mcp.AddTool(server,
-		&mcp.Tool{
+func registerTools(server *mcpsdk.Server, b mcpBackend, allowWrites bool) {
+	mcpsdk.AddTool(server,
+		&mcpsdk.Tool{
 			Name:        "classify",
 			Description: "Classify a string as a Jira issue key, Jira URL, GitHub PR URL, or external URL.",
 		},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in classifyIn) (*mcp.CallToolResult, any, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in classifyIn) (*mcpsdk.CallToolResult, any, error) {
 			res, err := b.Classify(ctx, in.Input, in.JiraSite)
 			if err != nil {
 				return errorResult(err), nil, nil
@@ -92,12 +92,12 @@ func registerTools(server *mcp.Server, b mcpBackend, allowWrites bool) {
 			return jsonResult(res), nil, nil
 		})
 
-	mcp.AddTool(server,
-		&mcp.Tool{
+	mcpsdk.AddTool(server,
+		&mcpsdk.Tool{
 			Name:        "get_issue",
 			Description: "Fetch a single Jira issue with its outbound references.",
 		},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in getIssueIn) (*mcp.CallToolResult, any, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in getIssueIn) (*mcpsdk.CallToolResult, any, error) {
 			issue, refs, err := b.GetIssue(ctx, in.Key)
 			if err != nil {
 				return errorResult(err), nil, nil
@@ -105,12 +105,12 @@ func registerTools(server *mcp.Server, b mcpBackend, allowWrites bool) {
 			return jsonResult(map[string]any{"issue": issue, "references": refs}), nil, nil
 		})
 
-	mcp.AddTool(server,
-		&mcp.Tool{
+	mcpsdk.AddTool(server,
+		&mcpsdk.Tool{
 			Name:        "crawl",
 			Description: "Crawl Jira issues from one or more start keys; returns a summary on completion. Progress notifications are sent per fetched issue when the client supplies a progress token.",
 		},
-		func(ctx context.Context, req *mcp.CallToolRequest, in crawlIn) (*mcp.CallToolResult, any, error) {
+		func(ctx context.Context, req *mcpsdk.CallToolRequest, in crawlIn) (*mcpsdk.CallToolResult, any, error) {
 			progress := progressFromRequest(ctx, req)
 			summary, err := b.Crawl(ctx, in.StartKeys, progress)
 			if err != nil {
@@ -119,12 +119,12 @@ func registerTools(server *mcp.Server, b mcpBackend, allowWrites bool) {
 			return jsonResult(summary), nil, nil
 		})
 
-	mcp.AddTool(server,
-		&mcp.Tool{
+	mcpsdk.AddTool(server,
+		&mcpsdk.Tool{
 			Name:        "get_graph",
 			Description: "Crawl Jira issues in-memory and return the discovered issue graph as {nodes, edges}; no files are written.",
 		},
-		func(ctx context.Context, req *mcp.CallToolRequest, in getGraphIn) (*mcp.CallToolResult, any, error) {
+		func(ctx context.Context, req *mcpsdk.CallToolRequest, in getGraphIn) (*mcpsdk.CallToolResult, any, error) {
 			progress := progressFromRequest(ctx, req)
 			summary, model, err := b.GetGraph(ctx, in.StartKeys, progress)
 			if err != nil {
@@ -133,12 +133,12 @@ func registerTools(server *mcp.Server, b mcpBackend, allowWrites bool) {
 			return jsonResult(map[string]any{"summary": summary, "graph": model}), nil, nil
 		})
 
-	mcp.AddTool(server,
-		&mcp.Tool{
+	mcpsdk.AddTool(server,
+		&mcpsdk.Tool{
 			Name:        "list_transitions",
 			Description: "List the workflow transitions currently available for an issue.",
 		},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in listTransitionsIn) (*mcp.CallToolResult, any, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in listTransitionsIn) (*mcpsdk.CallToolResult, any, error) {
 			ts, err := b.ListTransitions(ctx, in.Key)
 			if err != nil {
 				return errorResult(err), nil, nil
@@ -150,12 +150,12 @@ func registerTools(server *mcp.Server, b mcpBackend, allowWrites bool) {
 		return
 	}
 
-	mcp.AddTool(server,
-		&mcp.Tool{
+	mcpsdk.AddTool(server,
+		&mcpsdk.Tool{
 			Name:        "create_issue",
 			Description: "Create a new Jira issue.",
 		},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in createIssueIn) (*mcp.CallToolResult, any, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in createIssueIn) (*mcpsdk.CallToolResult, any, error) {
 			res, err := b.CreateIssue(ctx, in.Project, in.IssueType, CreateIssueFields{
 				Summary:     in.Summary,
 				Description: in.Description,
@@ -170,12 +170,12 @@ func registerTools(server *mcp.Server, b mcpBackend, allowWrites bool) {
 			return jsonResult(res), nil, nil
 		})
 
-	mcp.AddTool(server,
-		&mcp.Tool{
+	mcpsdk.AddTool(server,
+		&mcpsdk.Tool{
 			Name:        "update_issue",
 			Description: "Update fields on an existing Jira issue.",
 		},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in updateIssueIn) (*mcp.CallToolResult, any, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in updateIssueIn) (*mcpsdk.CallToolResult, any, error) {
 			err := b.UpdateIssue(ctx, in.Key, UpdateIssueFields{
 				Summary:     in.Summary,
 				Description: in.Description,
@@ -189,12 +189,12 @@ func registerTools(server *mcp.Server, b mcpBackend, allowWrites bool) {
 			return jsonResult(map[string]any{"ok": true, "key": in.Key}), nil, nil
 		})
 
-	mcp.AddTool(server,
-		&mcp.Tool{
+	mcpsdk.AddTool(server,
+		&mcpsdk.Tool{
 			Name:        "add_comment",
 			Description: "Add a plain-text comment to a Jira issue.",
 		},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in addCommentIn) (*mcp.CallToolResult, any, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in addCommentIn) (*mcpsdk.CallToolResult, any, error) {
 			c, err := b.AddComment(ctx, in.Key, in.Text)
 			if err != nil {
 				return errorResult(err), nil, nil
@@ -202,12 +202,12 @@ func registerTools(server *mcp.Server, b mcpBackend, allowWrites bool) {
 			return jsonResult(c), nil, nil
 		})
 
-	mcp.AddTool(server,
-		&mcp.Tool{
+	mcpsdk.AddTool(server,
+		&mcpsdk.Tool{
 			Name:        "transition_issue",
 			Description: "Move an issue through a workflow transition by id or by target status name.",
 		},
-		func(ctx context.Context, _ *mcp.CallToolRequest, in transitionIssueIn) (*mcp.CallToolResult, any, error) {
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in transitionIssueIn) (*mcpsdk.CallToolResult, any, error) {
 			err := b.TransitionIssue(ctx, in.Key, in.TransitionID, in.ToStatus, TransitionFields{
 				CommentText: in.CommentText,
 			})
@@ -227,14 +227,14 @@ func registerTools(server *mcp.Server, b mcpBackend, allowWrites bool) {
 // result readable in hosts that do not render structured_content;
 // production callers may also rely on the SDK's auto-populated
 // StructuredContent when the handler returns a typed Out.
-func jsonResult(v any) *mcp.CallToolResult {
+func jsonResult(v any) *mcpsdk.CallToolResult {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return errorResult(fmt.Errorf("marshal result: %w", err))
 	}
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{
-			&mcp.TextContent{Text: string(b)},
+	return &mcpsdk.CallToolResult{
+		Content: []mcpsdk.Content{
+			&mcpsdk.TextContent{Text: string(b)},
 		},
 	}
 }
@@ -245,11 +245,11 @@ func jsonResult(v any) *mcp.CallToolResult {
 // explicit packaging here lets us preserve the precise wording
 // (including any wrapped *client.APIError field details) that
 // downstream LLMs need to self-correct.
-func errorResult(err error) *mcp.CallToolResult {
-	return &mcp.CallToolResult{
+func errorResult(err error) *mcpsdk.CallToolResult {
+	return &mcpsdk.CallToolResult{
 		IsError: true,
-		Content: []mcp.Content{
-			&mcp.TextContent{Text: classifyError(err)},
+		Content: []mcpsdk.Content{
+			&mcpsdk.TextContent{Text: classifyError(err)},
 		},
 	}
 }
@@ -284,7 +284,7 @@ func classifyError(err error) string {
 // progress token, each invocation sends a progress notification on
 // the request's session; otherwise the returned function is a
 // silent no-op so the backend code path stays identical.
-func progressFromRequest(ctx context.Context, req *mcp.CallToolRequest) ProgressFn {
+func progressFromRequest(ctx context.Context, req *mcpsdk.CallToolRequest) ProgressFn {
 	if req == nil || req.Params == nil {
 		return noopProgress
 	}
@@ -297,7 +297,7 @@ func progressFromRequest(ctx context.Context, req *mcp.CallToolRequest) Progress
 		return noopProgress
 	}
 	return func(done, total int, message string) {
-		_ = session.NotifyProgress(ctx, &mcp.ProgressNotificationParams{
+		_ = session.NotifyProgress(ctx, &mcpsdk.ProgressNotificationParams{
 			ProgressToken: token,
 			Progress:      float64(done),
 			Total:         float64(total),

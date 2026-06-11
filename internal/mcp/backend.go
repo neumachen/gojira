@@ -1,4 +1,4 @@
-// Package mcpserver implements the gojira MCP server: a backend
+// Package mcp implements the gojira MCP server: a backend
 // interface with two implementations (facade-backed "self" mode and
 // gRPC-bridge "bridge" mode), a shared tool-registration layer that
 // gates mutating tools behind allow_writes, and the stdio bootstrap
@@ -7,7 +7,7 @@
 // The package is internal to gojira and stays focused on the MCP
 // adapter; domain logic lives in the gojira facade or behind the
 // gRPC client and is not reimplemented here.
-package mcpserver
+package mcp
 
 import (
 	"context"

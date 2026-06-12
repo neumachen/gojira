@@ -156,13 +156,16 @@ func TestRun_HelpFlag(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 3: --version → exit 0, stdout contains "v0.1.0"
+// Test 3: --version → exit 0, stdout contains the current Version
 // ---------------------------------------------------------------------------
 
 func TestRun_Version(t *testing.T) {
 	stdout, _, code := captureRun(context.Background(), []string{"gojira", "--version"}, nil)
 	assert.Equal(t, 0, code, "expected exit 0")
-	assert.Contains(t, stdout, "v0.1.0", "expected 'v0.1.0' in stdout")
+	// Track the canonical version constant rather than a hardcoded
+	// string so the assertion does not drift on every minor bump.
+	assert.Contains(t, stdout, gojira.Version,
+		"expected gojira.Version %q in stdout", gojira.Version)
 }
 
 // ---------------------------------------------------------------------------

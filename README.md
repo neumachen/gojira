@@ -1,5 +1,18 @@
 # gojira
 
+[![CI](https://github.com/neumachen/gojira/actions/workflows/ci.yml/badge.svg)](https://github.com/neumachen/gojira/actions/workflows/ci.yml)
+[![CD](https://github.com/neumachen/gojira/actions/workflows/cd.yml/badge.svg)](https://github.com/neumachen/gojira/actions/workflows/cd.yml)
+[![Coverage](https://img.shields.io/badge/coverage-77.6%25-brightgreen)](#testing-and-coverage)
+[![Go Reference](https://pkg.go.dev/badge/github.com/neumachen/gojira.svg)](https://pkg.go.dev/github.com/neumachen/gojira)
+[![Go Report Card](https://goreportcard.com/badge/github.com/neumachen/gojira)](https://goreportcard.com/report/github.com/neumachen/gojira)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
+> **Status badges** populate once the GitHub Actions `CI`/`CD` workflows
+> have run on the repository; on a fresh fork they render a neutral "no
+> status" state until the first workflow run. The coverage figure is the
+> first-party statement coverage reported by `go test` (see
+> [Testing and coverage](#testing-and-coverage)).
+
 A Go CLI and library for working with Jira Cloud from the command
 line. Its flagship `gojira crawl` recursively mirrors a Jira issue
 graph into Markdown — including the issue's hierarchy, development
@@ -660,6 +673,32 @@ Future releases anticipated:
   field-name overrides.
 
 No timelines committed. Direction only.
+
+## Testing and coverage
+
+The entire suite runs under the standard Go toolchain — `go test`, table-
+driven tests, golden files, `httptest` fakes, and `bufconn` for the gRPC
+service. There is no third-party test runner; assertions use a mix of
+`stretchr/testify` and the standard `testing` package.
+
+```sh
+# Run everything (the same command CI runs):
+go test ./... -count=1
+
+# With the race detector:
+go test ./... -count=1 -race
+
+# First-party statement coverage (attributes cross-package coverage so the
+# library facade, exercised only by integtest/, is counted correctly):
+go test ./... -count=1 -coverpkg=./... -coverprofile=cover.out
+go tool cover -func=cover.out | tail -1
+```
+
+The current first-party coverage is **77.6%** of statements (excluding the
+generated `gen/` protobuf bindings). The core paths — the library facade,
+crawl orchestration, rendering, parsing, and configuration cascade — sit
+at 80–100%; the lowest-covered first-party packages are the MCP bridge
+write path and the Dev Status error branches.
 
 ## Project documentation
 

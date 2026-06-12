@@ -4,7 +4,33 @@ All notable changes to gojira are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v0.2.0] — 2026-06-12
+
+### Added
+
+- `gojira serve` — a long-lived gRPC server exposing the full
+  capability surface (Classify, GetIssue, Crawl, GetGraph, and the
+  write RPCs) over `gojira.v1.Gojira`. Single-tenant, loopback by
+  default, no TLS/auth (trusted-network scope).
+- `gojira mcp` — a Model Context Protocol server over stdio so AI
+  hosts can use gojira as MCP tools. Config-driven `self`/`bridge`
+  modes; mutating tools gated behind `mcp.allow_writes`.
+- Write operations across the library, gRPC, CLI, and MCP surfaces:
+  `create`, `update`, `comment`, `transitions`, and `transition`
+  (with `--dry-run` previews for create/update). Issue deletion is
+  intentionally unsupported.
+- Graph export: `crawl --graph` writes `graph.json` and `graph.d2`
+  (D2 source); the library exposes `CrawlGraph` and the gRPC service
+  a `GetGraph` RPC returning the discovered graph in memory.
+- `gojira init` — scaffolds a `0600` config file at the XDG path with
+  a no-echo token prompt; a require-config guard now fronts every
+  Jira-touching command.
+- Crawl observability: a five-level log ladder (error/warn/info/
+  debug/trace) with structured correlation attributes and an
+  end-of-run `crawl.measurement` summary; credentials are always
+  redacted, even at trace.
+- CI now prints first-party statement coverage; the README carries
+  CI/CD/coverage/Go-reference/report-card/license badges.
 
 ### Changed
 

@@ -47,6 +47,13 @@ jobs:
       - name: Test (race detector)
         run: go test ./... -count=1 -race
 
+      - name: Coverage (first-party, excluding generated code)
+        run: |
+          go test ./... -count=1 -coverpkg=./... -coverprofile=cover.out
+          grep -v '/gen/gojira/v1/' cover.out > cover.nogen.out || cp cover.out cover.nogen.out
+          echo "First-party coverage:"
+          go tool cover -func=cover.nogen.out | tail -1
+
       - name: Smoke test the CLI binary
         run: |
           go build -o /tmp/gojira ./cmd/gojira

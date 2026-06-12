@@ -27,19 +27,37 @@ engine is available as an embeddable Go library.
 > Pre-1.0 status. APIs may change between minor versions until
 > v1.0 is tagged.
 
+> [!WARNING]
+> **Breaking changes in v0.2.0.** Two changes break compatibility with
+> v0.1.0:
+>
+> 1. **Package layout** — the reusable `classify`, `client`, and `log`
+>    packages moved under `pkg/`, so their import paths gained a `/pkg/`
+>    segment (e.g. `github.com/neumachen/gojira/pkg/client`). The library
+>    facade `github.com/neumachen/gojira` is unchanged.
+> 2. **Protocol services** — `internal/grpcserver` became `internal/grpc`
+>    and `internal/mcpserver` became `internal/mcp`, each behind an
+>    encapsulated `Serve(ctx, cfg)`. The `gojira.ServerConfig` /
+>    `gojira.LoadServerConfig` accessors were removed — read
+>    `Config.ServerAddress` from a loaded `Config` instead.
+>
+> See the [v0.2.0 changelog](./CHANGELOG.md) for the full list. This is a
+> pre-1.0 release; there is no migration shim, but no external consumers
+> depend on the previous paths.
+
 ## Install
 
 ### Go install
 
 ```sh
-go install github.com/neumachen/gojira/cmd/gojira@v0.1.0
+go install github.com/neumachen/gojira/cmd/gojira@v0.2.0
 ```
 
 ### Docker
 
 ```sh
 # Pull (when published to a registry) or build locally:
-docker build -t gojira:v0.1.0 .
+docker build -t gojira:v0.2.0 .
 ```
 
 A docker-compose.yml is provided for convenience; see "Docker
@@ -116,7 +134,7 @@ flag overrides the env var when both are set.
 | `--time-cap`                  | `GOJIRA_TIME_CAP_SECONDS`     | `0` (no cap)  | Max wall-clock seconds per run. |
 | `--concurrency`               | `GOJIRA_CONCURRENCY`          | `3`           | Concurrent Jira API requests. |
 | `--refetch`                   | `GOJIRA_REFETCH`              | `false`       | Re-fetch issues that already exist on disk. |
-| `--include-comments`          | `GOJIRA_INCLUDE_COMMENTS`     | `false`       | Fetch issue comments (v0.1.0 ignores them; reserved for v0.2). |
+| `--include-comments`          | `GOJIRA_INCLUDE_COMMENTS`     | `false`       | Fetch issue comments (not yet rendered as of v0.2.0; the field is fetched but the current renderer ignores it). |
 | `--include-children`          | `GOJIRA_INCLUDE_CHILDREN`     | `true`        | Discover hierarchy children via JQL parent search. |
 | `--child-search-limit`        | `GOJIRA_CHILD_SEARCH_LIMIT`   | `100`         | Max children to discover per parent. |
 | `--epic-link-field`           | `GOJIRA_EPIC_LINK_FIELD`      | (auto-detect) | Tenant's Epic Link custom-field ID. |
@@ -635,7 +653,7 @@ To expose the mutating tools to the host, add
 `"GOJIRA_MCP_ALLOW_WRITES": "true"` to the `env` block (or set
 `mcp.allow_writes: true` in your config file). Default is off.
 
-## Known limitations (v0.1.0)
+## Known limitations (v0.2.0)
 
 - Jira Cloud only. Jira Server / Data Center is out of scope for
   the entire product.

@@ -1,13 +1,15 @@
 # gojira
 
 A Go CLI and library for working with Jira Cloud from the command
-line. The v0.1.0 release ships `gojira crawl`, which recursively
-mirrors a Jira issue graph into Markdown — including the issue's
-hierarchy, development metadata (branches, commits, pull requests,
-builds, repositories), and human-labelled custom fields. Future
-releases will add subcommands for targeted fetching, ticket
-creation and update, and other workflows that today require the
-Jira UI.
+line. Its flagship `gojira crawl` recursively mirrors a Jira issue
+graph into Markdown — including the issue's hierarchy, development
+metadata (branches, commits, pull requests, builds, repositories),
+and human-labelled custom fields — and can export the discovered
+graph as JSON and D2. Beyond crawling, gojira also ships a gRPC
+server (`gojira serve`), a Model Context Protocol server for AI
+hosts (`gojira mcp`), and write operations to create and update
+issues, add comments, and run workflow transitions. The same
+engine is available as an embeddable Go library.
 
 > Pre-1.0 status. APIs may change between minor versions until
 > v1.0 is tagged.
@@ -418,8 +420,10 @@ the redaction is audited by a unit test
 ## gRPC service (`gojira serve`)
 
 In addition to the one-shot `crawl` subcommand, gojira can run as a
-long-lived gRPC server that exposes its crawl and fetch capabilities to
-other front-ends (e.g. a TUI or an MCP server).
+long-lived gRPC server that exposes its full capability surface —
+classification, issue fetch, recursive crawl, in-memory graph export,
+and write operations (create/update/comment/transitions) — to other
+front-ends such as a TUI or the `gojira mcp` bridge.
 
 ```bash
 # Start the server (reads the same GOJIRA_* config as `crawl`).

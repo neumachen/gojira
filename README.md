@@ -110,7 +110,7 @@ flag overrides the env var when both are set.
 | `--dev-status-data-types`     | `GOJIRA_DEV_STATUS_DATA_TYPES` | `pullrequest,branch,commit,repository,build` | Comma-separated dataType values to query. |
 | `--render-null-custom-fields` | `GOJIRA_RENDER_NULL_CUSTOM_FIELDS` | `false`  | Include custom fields whose value is JSON null. |
 | `--graph`                     | `GOJIRA_EMIT_GRAPH`           | `false`       | Write `graph.json` and `graph.d2` (D2 source) at the output-dir root. |
-| `--log-level`                 | `GOJIRA_LOG_LEVEL`            | `info`        | One of: `error`, `warn`, `info`, `debug`. |
+| `--log-level`                 | `GOJIRA_LOG_LEVEL`            | `info`        | One of: `error`, `warn`, `info`, `debug`, `trace`. |
 | `--log-format`                | `GOJIRA_LOG_FORMAT`           | `text`        | One of: `text` (human-readable), `json` (one JSON object per line). |
 | `--config`                    | `GOJIRA_CONFIG_FILE`          | (discovered)  | Path to a YAML config file (see [Configuration](#configuration)). |
 
@@ -332,9 +332,13 @@ func main() {
 }
 ```
 
-The four named library capabilities (`Classify`, `LoadConfig`,
-`FetchAndRender`, `Crawl`) plus the type aliases for `Config`,
-`Summary`, `Sink`, and `Event` are documented in
+The library facade groups its capabilities into classification
+(`Classify`), configuration (`LoadConfig` and friends), fetch/render
+(`GetIssue`, `FetchAndRender`), crawl (`Crawl`, `CrawlGraph`), and
+write operations (`CreateIssue`, `UpdateIssue`, `AddComment`,
+`ListTransitions`, `TransitionIssue`), plus type aliases for `Config`,
+`Summary`, `Sink`, `Event`, and the graph model
+(`GraphModel`/`GraphNode`/`GraphEdge`). All are documented in
 [`gojira.go`](./gojira.go)'s package doc.
 
 ## Observability and tracing
@@ -438,6 +442,7 @@ authentication**.
 | `Classify` | unary | Classify a bare key or URL into `JiraKey`, `JiraURL`, `GitHubPR`, or `External`. |
 | `GetIssue` | unary | Fetch one issue. The response is a structured proto `Issue`, rendered Markdown, or JSON, selected by the request's `OutputFormat` (`STRUCTURED`, `MARKDOWN`, `JSON`). |
 | `Crawl` | server-streaming | Recursively crawl from one or more start keys, streaming a `CrawlEvent` for each state transition. Issue content is written server-side to the configured output directory (streaming content over the wire is deferred to Phase 2). |
+| `GetGraph` | unary | Crawl in-memory from one or more start keys and return the discovered issue graph as nodes and edges, without writing files. Mirrors the library's `CrawlGraph` and the CLI's `crawl --graph`. |
 | `CreateIssue` | unary | Create an issue (project + type required; fields via summary/description/labels/parent and a `raw_fields` map). `dry_run` returns the request body the server would send, without creating anything. |
 | `UpdateIssue` | unary | Edit fields on an existing issue. Honors `dry_run` like `CreateIssue`. |
 | `AddComment` | unary | Append a comment (plain text, converted to ADF server-side) to an issue. |
@@ -481,7 +486,7 @@ scope for this phase.
 | `--user` | `GOJIRA_USER` | (required) | Atlassian account email. |
 | `--token` | `GOJIRA_TOKEN` | (required) | Atlassian API token. |
 | `--output-dir` | `GOJIRA_OUTPUT_DIR` | `./out` | Output root directory for `Crawl`. |
-| `--log-level` | `GOJIRA_LOG_LEVEL` | `info` | One of `error`, `warn`, `info`, `debug`. |
+| `--log-level` | `GOJIRA_LOG_LEVEL` | `info` | One of `error`, `warn`, `info`, `debug`, `trace`. |
 | `--log-format` | `GOJIRA_LOG_FORMAT` | `text` | One of `text`, `json`. |
 
 The server address can also be set in the YAML config file:
@@ -636,8 +641,8 @@ To expose the mutating tools to the host, add
 
 Future releases anticipated:
 
-- Front-ends over the gRPC API: a terminal UI (TUI) and a Model
-  Context Protocol (MCP) server, both as gRPC clients.
+- A terminal UI (TUI) front-end over the gRPC API, as a gRPC client.
+  (The MCP server already shipped — see [MCP server](#mcp-server-gojira-mcp).)
 - Phase 2 service work: streaming rendered issue content over the
   wire, multi-tenant identities, per-request configuration
   overrides, and TLS/authentication.

@@ -1,24 +1,39 @@
 // Package gojira is the public library facade for the gojira Jira-to-Markdown
-// mirror tool. It exposes exactly five named capabilities committed in PRD §8:
+// mirror tool. It exposes the full capability surface as one cohesive package
+// so third-party programs can embed gojira without touching its internal
+// packages or the CLI binary. The exported capabilities group into:
 //
-//  1. [Classify] — classify a URL or bare issue key.
-//  2. [LoadConfig] / [Config] — build and validate a runtime configuration.
-//  3. [GetIssue] — fetch one Jira issue and return structured typed data.
-//  4. [FetchAndRender] — fetch one Jira issue and return rendered Markdown
-//     (convenience wrapper over [GetIssue] + render).
-//  5. [Crawl] / [Summary] — run a full recursive crawl to disk.
+//   - Classification — [Classify] turns a URL or bare issue key into a typed
+//     result (Jira key, Jira URL, GitHub PR, or external).
+//   - Configuration — [LoadConfig], [LoadFileConfig], and [LoadAppConfig]
+//     build and validate a runtime [Config] from a kv map, a YAML file, or
+//     the full file < env cascade.
+//   - Fetch and render — [GetIssue] returns one issue as structured typed
+//     data; [FetchAndRender] is the convenience wrapper that also renders
+//     Markdown; [ParseOutputFormat]/[OutputFormat] select the presentation
+//     form.
+//   - Crawl — [Crawl] (and [CrawlWithLogger]) run a full recursive crawl to
+//     disk and return a [Summary]; [CrawlGraph] returns the discovered issue
+//     graph in memory as a [GraphModel] ([GraphNode]/[GraphEdge]) instead of
+//     (or in addition to) writing graph artifacts.
+//   - Write operations — [CreateIssue], [UpdateIssue], [AddComment],
+//     [ListTransitions], [TransitionIssue], and [TransitionIssueByStatus]
+//     mutate Jira; [BuildCreateIssueBody]/[BuildUpdateIssueBody] expose the
+//     request-body builders for dry-run previews.
+//   - Event sinks — [Sink], [Event], [NoopSink], and [NewSlogSink] let
+//     callers observe crawl progress.
 //
 // # Public surface invariants
 //
 //   - No flag parsing, CLI argument handling, or process-level signal handling.
 //   - No os.Exit calls.
 //   - No hard-coded credentials, Jira domains, or project keys.
-//   - All internal packages are hidden; only the five capabilities and their
-//     supporting types are exported.
+//   - All internal packages are hidden; only the facade capabilities and
+//     their supporting types are exported.
 //   - The CLI binary (cmd/gojira) is a thin consumer of this package; it is
 //     never required to use the library.
 //
-// # Minimal usage example (third-party consumer workflow from PRD §8)
+// # Minimal usage example (third-party consumer workflow)
 //
 //	cfg, err := gojira.LoadConfig(map[string]string{
 //	    "GOJIRA_SITE":       "https://mycompany.atlassian.net",

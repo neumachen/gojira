@@ -300,6 +300,30 @@ func buildRootCommand(env map[string]string, signalled *atomic.Bool, unknownSubc
 		Name:    "gojira",
 		Usage:   "Jira-to-Markdown mirror tool",
 		Version: gojira.Version,
+		// EnableShellCompletion injects an auto-generated
+		// `gojira completion <bash|zsh|fish|pwsh>` subcommand
+		// (urfave/cli/v3 ≥ v3.0). The completion logic is derived
+		// from the command tree, so adding a new subcommand or flag
+		// automatically extends completion without further wiring.
+		// The completion command does NOT call requireConfig (the
+		// guard runs inside each Jira-touching command's Action,
+		// never globally), so completion works on a fresh box with
+		// no config — same UX as `init`, `--help`, and `--version`.
+		EnableShellCompletion: true,
+		// ConfigureShellCompletionCommand pins the auto-injected
+		// completion subcommand's Writer/ErrWriter to the SAME
+		// stdout/stderr the rest of the CLI uses. Without this,
+		// urfave/cli/v3 v3.9.0's setupDefaults sets the subcommand's
+		// Writer to os.Stdout directly when it is nil — bypassing
+		// any cmd.Writer assignment made on the parent (cf.
+		// command_setup.go:53 and completion.go:96). The override
+		// keeps test capture working AND keeps `gojira completion
+		// <shell>` consistent with `gojira init`, `gojira crawl`,
+		// etc. when callers redirect stdout/stderr explicitly.
+		ConfigureShellCompletionCommand: func(c *urfave.Command) {
+			c.Writer = stdout
+			c.ErrWriter = stderr
+		},
 		// Description appears in --help between the NAME line and the
 		// flags/commands block. The opening paragraph surveys the
 		// whole command surface so help readers see more than crawl
@@ -818,6 +842,7 @@ Commands:
   transition    Move an issue through a workflow transition
 
 Run 'gojira <command> --help' for command-specific flags.
+Run 'gojira completion <bash|zsh|fish|pwsh>' to generate shell completions.
   gojira --help
   gojira --version
 `, gojira.Version)

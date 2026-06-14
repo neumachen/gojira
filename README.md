@@ -63,6 +63,28 @@ docker build -t gojira:v0.2.0 .
 A docker-compose.yml is provided for convenience; see "Docker
 Compose" below.
 
+## Shell completion
+
+gojira can generate completion scripts for bash, zsh, fish, and
+PowerShell. Add the matching line to your shell's startup file:
+
+```sh
+# bash — ~/.bashrc
+source <(gojira completion bash)
+
+# zsh — ~/.zshrc (ensure `autoload -U compinit && compinit` runs first)
+source <(gojira completion zsh)
+
+# fish
+gojira completion fish > ~/.config/fish/completions/gojira.fish
+
+# PowerShell — add to $PROFILE
+gojira completion pwsh | Out-String | Invoke-Expression
+```
+
+Completion works without any gojira configuration, so you can set it up
+before running `gojira init`.
+
 ## Quick start
 
 ```sh

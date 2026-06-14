@@ -178,6 +178,18 @@ func TestGuard_NoConfig_FailsFast_BeforeHTTP(t *testing.T) {
 		assert.Contains(t, stderr, alt,
 			"stderr must list alternative %q", alt)
 	}
+	// Feature C — the message must name BOTH config locations and
+	// BOTH `init` variants so users discover the project-local
+	// option without re-reading --help.
+	for _, needle := range []string{
+		"gojira init --local",
+		"project-local ./gojira.yaml",
+		"~/.config/gojira/config.yaml",
+	} {
+		assert.Contains(t, stderr, needle,
+			"stderr must surface the local-config option (%q); got %q",
+			needle, stderr)
+	}
 	assert.Equal(t, 0, len(srv.records()),
 		"guard must fail before any HTTP call; got %d recorded requests",
 		len(srv.records()))

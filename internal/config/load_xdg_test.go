@@ -195,3 +195,276 @@ func openYAMLFile(t *testing.T, path string) *os.File {
 	t.Cleanup(func() { _ = f.Close() })
 	return f
 }
+
+// ---------------------------------------------------------------------------
+// Feature B — local-over-global file-layer layering
+// ---------------------------------------------------------------------------
+//
+// The implicit discovery case (no --config flag, no $GOJIRA_CONFIG_FILE)
+// must apply the global XDG config FIRST and the project-local
+// ./gojira.yaml SECOND, so per-field local-over-global overrides work.
+// The explicit pinned-file cases (--config and $GOJIRA_CONFIG_FILE) must
+// keep their single-file semantics — no layering, no surprises.
+
+// writeFullGlobalYAML writes a complete, schema-valid YAML at path
+// (creating parent dirs) and returns the path. Distinct from
+// writeYAML by being explicit about each field so layering tests can
+// assert which file owned which value. The crawl.concurrency knob is
+// included to give the layering test a non-Jira knob to override.
+func writeFullGlobalYAML(t *testing.T, path string) string {
+	t.Helper()
+	const body = `schema: gojira.config.v1
+jira:
+  base_url: https://global.example.com
+  email: global@example.com
+  api_token: global-token
+output:
+  dir: /tmp/global-out
+crawl:
+  concurrency: 5
+server:
+  address: 127.0.0.1:60000
+log:
+  level: info
+  format: text
+`
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(body), 0o644))
+	return path
+}
+
+// layeringResolver wires the resolver to a fake XDG_CONFIG_HOME so
+// the global candidate resolves under xdg/gojira/config.yaml, while
+// the local candidate is governed by os.Getwd (controlled in the
+// test via t.Chdir). No home directory is configured.
+func layeringResolver(xdgConfigHome string) *XDGResolver {
+	return NewXDGResolver(
+		envLookup(map[string]string{EnvXDGConfigHome: xdgConfigHome}),
+		errHomeDir,
+	)
+}
+
+// TestLoadApp_GlobalAndLocal_LayeringPerField is the headline Feature
+// B test: a full global config supplies every required value; a
+// partial local file overrides ONLY two fields. The effective App
+// must take the two overridden fields from local and the remaining
+// fields from global — proving the layering is per-FIELD, not
+// winner-takes-all.
+func TestLoadApp_GlobalAndLocal_LayeringPerField(t *testing.T) {
+	xdg := t.TempDir()
+	writeFullGlobalYAML(t,
+		filepath.Join(xdg, AppName, GlobalConfigFileName))
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	// Partial local: only crawl.concurrency and output.dir overridden,
+	// every other field inherited from global. NO jira section, NO
+	// server section — they MUST come from global for this to pass
+	// Layer-2 validation.
+	const localBody = `schema: gojira.config.v1
+output:
+  dir: /tmp/local-out
+crawl:
+  concurrency: 9
+`
+	localPath := filepath.Join(cwd, LocalConfigFileName)
+	require.NoError(t, os.WriteFile(localPath, []byte(localBody), 0o644))
+
+	app, err := LoadApp(LoadOptions{
+		Resolver: layeringResolver(xdg),
+	})
+	require.NoError(t, err, "layered load must succeed")
+
+	// Local wins on the two overridden fields.
+	assert.Equal(t, "/tmp/local-out", app.Output.Dir,
+		"local must override global on output.dir")
+	assert.Equal(t, 9, app.Crawl.Concurrency,
+		"local must override global on crawl.concurrency")
+
+	// Global fills the gaps for everything the local file did not
+	// touch — the proof that layering is field-by-field.
+	assert.Equal(t, "https://global.example.com", app.Jira.BaseURL,
+		"jira.base_url must be inherited from global")
+	assert.Equal(t, "global@example.com", app.Jira.Email,
+		"jira.email must be inherited from global")
+	assert.Equal(t, "global-token", app.Jira.APIToken,
+		"jira.api_token must be inherited from global")
+	assert.Equal(t, "127.0.0.1:60000", app.Server.Address,
+		"server.address must be inherited from global")
+
+	// App.ConfigFile reports the MOST-SPECIFIC contributing file —
+	// the local one — because that is the file diagnostics will
+	// point users at first.
+	assert.Equal(t, localPath, app.ConfigFile,
+		"ConfigFile must name the most-specific contributing file (local)")
+}
+
+// TestLoadApp_GlobalOnly_NoLocal asserts the global file is used
+// wholesale when no local file exists — the same UX the pre-Feature-
+// B code already had on this code path, kept stable for users who
+// only ever wrote a global config.
+func TestLoadApp_GlobalOnly_NoLocal(t *testing.T) {
+	xdg := t.TempDir()
+	globalPath := writeFullGlobalYAML(t,
+		filepath.Join(xdg, AppName, GlobalConfigFileName))
+
+	t.Chdir(t.TempDir()) // clean cwd: no local file
+
+	app, err := LoadApp(LoadOptions{
+		Resolver: layeringResolver(xdg),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "https://global.example.com", app.Jira.BaseURL)
+	assert.Equal(t, "/tmp/global-out", app.Output.Dir)
+	assert.Equal(t, 5, app.Crawl.Concurrency)
+	assert.Equal(t, globalPath, app.ConfigFile,
+		"ConfigFile must point at the global file when only global was applied")
+}
+
+// TestLoadApp_LocalOnly_NoGlobal asserts a project-local file with
+// every required field is loaded wholesale when no global file
+// exists; ConfigFile names the local file.
+func TestLoadApp_LocalOnly_NoGlobal(t *testing.T) {
+	xdg := t.TempDir() // empty: no global file underneath
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	localPath := writeFullGlobalYAML(t,
+		filepath.Join(cwd, LocalConfigFileName))
+
+	app, err := LoadApp(LoadOptions{
+		Resolver: layeringResolver(xdg),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "https://global.example.com", app.Jira.BaseURL,
+		"local file (using the writeFullGlobalYAML body) must load wholesale")
+	assert.Equal(t, localPath, app.ConfigFile,
+		"ConfigFile must point at the local file when only local was applied")
+}
+
+// TestLoadApp_ExplicitConfigPath_NoLayering asserts the --config
+// pin is exempt from layering: even if a project-local ./gojira.yaml
+// exists in the cwd, an explicit ConfigPath uses ONLY that file.
+func TestLoadApp_ExplicitConfigPath_NoLayering(t *testing.T) {
+	// Drop a "would-override" local file in the cwd; the explicit
+	// config path must NOT pull this file's values in.
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	const localBody = `schema: gojira.config.v1
+output:
+  dir: /tmp/local-should-not-win
+`
+	require.NoError(t, os.WriteFile(
+		filepath.Join(cwd, LocalConfigFileName),
+		[]byte(localBody), 0o644))
+
+	explicit := writeFullGlobalYAML(t,
+		filepath.Join(t.TempDir(), "explicit.yaml"))
+
+	app, err := LoadApp(LoadOptions{
+		ConfigPath: explicit,
+		Resolver:   quietResolver(),
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/global-out", app.Output.Dir,
+		"explicit --config must not be layered over by ./gojira.yaml")
+	assert.Equal(t, explicit, app.ConfigFile,
+		"ConfigFile must name the explicit file, not the local")
+}
+
+// TestLoadApp_GojiraConfigFileEnv_NoLayering mirrors the previous
+// test for the env-var pin: $GOJIRA_CONFIG_FILE is treated the same
+// as --config and disables global+local layering.
+func TestLoadApp_GojiraConfigFileEnv_NoLayering(t *testing.T) {
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	const localBody = `schema: gojira.config.v1
+output:
+  dir: /tmp/local-should-not-win
+`
+	require.NoError(t, os.WriteFile(
+		filepath.Join(cwd, LocalConfigFileName),
+		[]byte(localBody), 0o644))
+
+	envPath := writeFullGlobalYAML(t,
+		filepath.Join(t.TempDir(), "via-env.yaml"))
+
+	// A global file ALSO exists; even so, the env-pin wins alone.
+	xdg := t.TempDir()
+	writeFullGlobalYAML(t,
+		filepath.Join(xdg, AppName, GlobalConfigFileName))
+
+	resolver := NewXDGResolver(
+		envLookup(map[string]string{
+			EnvGojiraConfigFile: envPath,
+			EnvXDGConfigHome:    xdg,
+		}),
+		errHomeDir,
+	)
+
+	app, err := LoadApp(LoadOptions{
+		Resolver: resolver,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "/tmp/global-out", app.Output.Dir,
+		"$GOJIRA_CONFIG_FILE must not be layered over by ./gojira.yaml")
+	assert.Equal(t, envPath, app.ConfigFile,
+		"ConfigFile must name the env-pinned file")
+}
+
+// TestLoadApp_InvalidLocal_FailsEvenWithValidGlobal asserts Layer-1
+// schema validation runs PER FILE: an invalid local file rejects
+// the load even when the global file is fine. Otherwise a bad
+// override would silently fall back to global, masking the user's
+// mistake.
+func TestLoadApp_InvalidLocal_FailsEvenWithValidGlobal(t *testing.T) {
+	xdg := t.TempDir()
+	writeFullGlobalYAML(t,
+		filepath.Join(xdg, AppName, GlobalConfigFileName))
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	// Unknown top-level key triggers Layer-1 additionalProperties:false.
+	const badLocal = `schema: gojira.config.v1
+this_is_not_a_real_top_level_key: oops
+`
+	require.NoError(t, os.WriteFile(
+		filepath.Join(cwd, LocalConfigFileName),
+		[]byte(badLocal), 0o644))
+
+	_, err := LoadApp(LoadOptions{
+		Resolver: layeringResolver(xdg),
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidValue,
+		"invalid local file must surface Layer-1 ErrInvalidValue, "+
+			"not silently fall back to global")
+}
+
+// TestLoadApp_EmptyLocal_PreservesGlobal asserts a whitespace-only
+// local file does NOT erase the global file's fields — decodeYAML's
+// EOF no-op contract holds at the layering boundary too.
+func TestLoadApp_EmptyLocal_PreservesGlobal(t *testing.T) {
+	xdg := t.TempDir()
+	writeFullGlobalYAML(t,
+		filepath.Join(xdg, AppName, GlobalConfigFileName))
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	localPath := filepath.Join(cwd, LocalConfigFileName)
+	require.NoError(t, os.WriteFile(localPath, []byte("\n   \n\n"), 0o644))
+
+	app, err := LoadApp(LoadOptions{
+		Resolver: layeringResolver(xdg),
+	})
+	require.NoError(t, err, "empty local file must be a no-op, not an error")
+	assert.Equal(t, "https://global.example.com", app.Jira.BaseURL,
+		"global jira fields must survive an empty local layer")
+	assert.Equal(t, "/tmp/global-out", app.Output.Dir,
+		"global output.dir must survive an empty local layer")
+	// Empty local contributed nothing → ConfigFile names global.
+	assert.Equal(t,
+		filepath.Join(xdg, AppName, GlobalConfigFileName),
+		app.ConfigFile,
+		"ConfigFile must name the global file when local was empty")
+}

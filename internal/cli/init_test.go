@@ -271,3 +271,195 @@ func TestInit_HelpFlag_Exempt(t *testing.T) {
 		"`init --help` must not trigger the guard")
 	assert.Contains(t, stdout, "Create a gojira config file")
 }
+
+// ---------------------------------------------------------------------------
+// --local / --global target selection
+// ---------------------------------------------------------------------------
+
+// TestInit_Local_WritesCompleteProjectConfig verifies that
+// `gojira init --local` writes a COMPLETE, schema-valid gojira.yaml
+// into the current working directory at mode 0600, does NOT create
+// the global XDG config, and announces the local absolute path.
+func TestInit_Local_WritesCompleteProjectConfig(t *testing.T) {
+	xdg := setXDG(t)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	outputDir := t.TempDir()
+
+	stdout, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "init", "--local",
+			"--site", "https://x.atlassian.net",
+			"--user", "u@example.com",
+			"--token", "t-secret",
+			"--output-dir", outputDir,
+			"--server-address", "127.0.0.1:50051",
+		},
+		map[string]string{})
+	require.Equal(t, 0, code, "stderr=%q stdout=%q", stderr, stdout)
+
+	localPath := filepath.Join(cwd, config.LocalConfigFileName)
+	info, err := os.Stat(localPath)
+	require.NoError(t, err, "local config must exist at %s", localPath)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "file perms")
+	assert.Contains(t, stdout, localPath,
+		"stdout must announce the written local path")
+
+	// Global XDG path must NOT have been created.
+	_, gerr := os.Stat(configYAMLPath(xdg))
+	assert.True(t, os.IsNotExist(gerr),
+		"global config must NOT exist after --local; got err=%v", gerr)
+
+	// Round-trip: every field set by init must come back through the
+	// loader, including the server address (which the global-path
+	// happy-path test already covers — we re-check it here to prove
+	// the local file is self-sufficient, NOT a partial overlay).
+	cfg, err := gojira.LoadFileConfig(localPath)
+	require.NoError(t, err, "LoadFileConfig")
+	assert.Equal(t, "https://x.atlassian.net", cfg.Site)
+	assert.Equal(t, "u@example.com", cfg.User)
+	assert.Equal(t, "t-secret", cfg.Token)
+	assert.Equal(t, outputDir, cfg.OutputDir)
+
+	// Raw-body sanity: the YAML body must explicitly mention each
+	// top-level section so the file is recognisably complete even
+	// without going through the facade.
+	raw, err := os.ReadFile(localPath)
+	require.NoError(t, err)
+	body := string(raw)
+	for _, needle := range []string{
+		"base_url", "email", "api_token", // jira section
+		"dir:",                     // output section
+		"address: 127.0.0.1:50051", // server section
+	} {
+		assert.Contains(t, body, needle,
+			"local config body missing %q; got:\n%s", needle, body)
+	}
+}
+
+// TestInit_GlobalAndLocal_MutuallyExclusive asserts that passing both
+// flags is a hard error with the documented exit code and message,
+// and writes NOTHING to either target.
+func TestInit_GlobalAndLocal_MutuallyExclusive(t *testing.T) {
+	xdg := setXDG(t)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	_, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "init", "--global", "--local",
+			"--site", "https://x.atlassian.net",
+			"--user", "u@example.com",
+			"--token", "t-secret",
+			"--output-dir", t.TempDir(),
+			"--server-address", "127.0.0.1:50051",
+		},
+		map[string]string{})
+	assert.Equal(t, 1, code)
+	assert.Contains(t, stderr, "mutually exclusive",
+		"stderr must explain the conflict; got %q", stderr)
+
+	// Neither file may exist after the rejection.
+	_, gerr := os.Stat(configYAMLPath(xdg))
+	assert.True(t, os.IsNotExist(gerr),
+		"global config must NOT exist; got err=%v", gerr)
+	_, lerr := os.Stat(filepath.Join(cwd, config.LocalConfigFileName))
+	assert.True(t, os.IsNotExist(lerr),
+		"local config must NOT exist; got err=%v", lerr)
+}
+
+// localInitArgs returns the standard --local argv with all required
+// values supplied via flags, so the prompt seams stay untouched.
+func localInitArgs(outputDir string) []string {
+	return []string{"gojira", "init", "--local",
+		"--site", "https://x.atlassian.net",
+		"--user", "u@example.com",
+		"--token", "t-secret",
+		"--output-dir", outputDir,
+		"--server-address", "127.0.0.1:50051",
+	}
+}
+
+// TestInit_Local_GitignoreNudge_AppendsWhenMissing covers case (a):
+// a ./.gitignore exists WITHOUT a gojira.yaml entry → after
+// `init --local` the file ends with a "gojira.yaml" line and stdout
+// reports the addition.
+func TestInit_Local_GitignoreNudge_AppendsWhenMissing(t *testing.T) {
+	setXDG(t)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	gitignorePath := filepath.Join(cwd, ".gitignore")
+	preBody := "node_modules/\n*.log\n"
+	require.NoError(t, os.WriteFile(gitignorePath, []byte(preBody), 0o644))
+
+	stdout, stderr, code := captureRun(context.Background(),
+		localInitArgs(t.TempDir()), map[string]string{})
+	require.Equal(t, 0, code, "stderr=%q stdout=%q", stderr, stdout)
+
+	assert.Contains(t, stdout, "added gojira.yaml to .gitignore",
+		"stdout must announce the .gitignore amendment")
+
+	post, err := os.ReadFile(gitignorePath)
+	require.NoError(t, err)
+	lines := strings.Split(strings.TrimRight(string(post), "\n"), "\n")
+	found := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) == config.LocalConfigFileName {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found,
+		"gojira.yaml must appear as a line in .gitignore; got:\n%s", string(post))
+	// Existing entries must be preserved.
+	assert.Contains(t, string(post), "node_modules/")
+	assert.Contains(t, string(post), "*.log")
+}
+
+// TestInit_Local_GitignoreNudge_NoOpWhenAlreadyPresent covers case
+// (b): an existing .gitignore that already lists "gojira.yaml" is
+// left BYTE-IDENTICAL and no add-message is printed.
+func TestInit_Local_GitignoreNudge_NoOpWhenAlreadyPresent(t *testing.T) {
+	setXDG(t)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	gitignorePath := filepath.Join(cwd, ".gitignore")
+	preBody := "node_modules/\ngojira.yaml\n*.log\n"
+	require.NoError(t, os.WriteFile(gitignorePath, []byte(preBody), 0o644))
+
+	stdout, stderr, code := captureRun(context.Background(),
+		localInitArgs(t.TempDir()), map[string]string{})
+	require.Equal(t, 0, code, "stderr=%q stdout=%q", stderr, stdout)
+
+	assert.NotContains(t, stdout, "added gojira.yaml to .gitignore",
+		"stdout must NOT announce an amendment when the entry already exists")
+
+	post, err := os.ReadFile(gitignorePath)
+	require.NoError(t, err)
+	assert.Equal(t, preBody, string(post),
+		".gitignore must be byte-identical when gojira.yaml is already listed")
+}
+
+// TestInit_Local_GitignoreNudge_WarnsWhenAbsent covers case (c): no
+// .gitignore at all → a warning is written to stderr and NO
+// .gitignore is created (we don't silently fabricate VCS files).
+func TestInit_Local_GitignoreNudge_WarnsWhenAbsent(t *testing.T) {
+	setXDG(t)
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	_, stderr, code := captureRun(context.Background(),
+		localInitArgs(t.TempDir()), map[string]string{})
+	require.Equal(t, 0, code, "stderr=%q", stderr)
+
+	assert.Contains(t, stderr, "warning:",
+		"stderr must carry a warning prefix; got %q", stderr)
+	assert.Contains(t, stderr, ".gitignore",
+		"warning must mention .gitignore; got %q", stderr)
+	assert.Contains(t, stderr, "gojira.yaml",
+		"warning must mention the secret-bearing filename; got %q", stderr)
+
+	_, err := os.Stat(filepath.Join(cwd, ".gitignore"))
+	assert.True(t, os.IsNotExist(err),
+		"warning path must NOT create a .gitignore; got err=%v", err)
+}

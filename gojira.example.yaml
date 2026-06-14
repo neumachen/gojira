@@ -2,16 +2,24 @@
 #
 # gojira.example.yaml — annotated reference for the gojira configuration file.
 #
+# This file can live EITHER at the global XDG path
+# (~/.config/gojira/config.yaml) OR as a project-local ./gojira.yaml,
+# or both. When both exist, the local ./gojira.yaml overrides the
+# global per field — any field omitted from the local file is
+# inherited from the global config.
+#
 # Copy this to one of the discovered locations:
-#   ./gojira.yaml                         (per-project)
+#   ./gojira.yaml                         (per-project; written by `gojira init --local`)
 #   $XDG_CONFIG_HOME/gojira/config.yaml
 #   ~/.config/gojira/config.yaml          (XDG fallback)
 #
 # Or point at it explicitly with `--config <path>` (highest-precedence
-# discovery candidate) or the GOJIRA_CONFIG_FILE env var.
+# discovery candidate) or the GOJIRA_CONFIG_FILE env var; an explicit
+# pin loads ONLY that file with no global/local layering.
 #
-# `gojira init` generates a file with this same shape at the XDG config
-# location ($XDG_CONFIG_HOME/gojira/config.yaml or ~/.config/gojira/config.yaml).
+# `gojira init` generates a file with this same shape at the global
+# XDG config location by default; `gojira init --local` writes a
+# self-sufficient ./gojira.yaml in the current directory instead.
 #
 # Cascade precedence (low → high):
 #   embedded defaults < this YAML file < GOJIRA_ environment variables < CLI flags

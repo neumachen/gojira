@@ -4,6 +4,30 @@ All notable changes to gojira are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.4.0] — 2026-06-14
+
+### Added
+
+- `gojira completion <bash|zsh|fish|pwsh>` prints a shell completion
+  script for the chosen shell. The script is generated from the live
+  command tree, so subcommands and flags are tracked automatically as
+  the CLI grows — there is no hand-maintained completion list to drift.
+  Implemented by enabling urfave/cli/v3's built-in shell completion on
+  the root command, so no new dependency is introduced. The
+  `completion` subcommand is also exempt from the require-config guard,
+  so users can wire up completions before running `gojira init`.
+  Per-shell setup instructions (one-shot eval and persistent install)
+  are documented in the README.
+
+### Fixed
+
+- The bare-`gojira` usage screen and `gojira --help` now list every
+  subcommand — `crawl`, `serve`, `mcp`, `init`, `create`, `update`,
+  `comment`, `transitions`, `transition`, and `completion` — instead
+  of advertising only `crawl`. The `crawl` exit-code legend is
+  preserved, so scripts that key off those codes are unaffected; this
+  is purely a discoverability fix for the top-level help output.
+
 ## [v0.3.0] — 2026-06-12
 
 ### Added

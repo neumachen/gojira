@@ -66,6 +66,8 @@ func initCommand(env map[string]string) *urfave.Command {
 			&urfave.StringFlag{Name: "server-address", Usage: "gRPC server bind address",
 				Sources: src("GOJIRA_SERVER_ADDRESS")},
 			&urfave.BoolFlag{Name: "force", Usage: "Overwrite an existing config file"},
+			&urfave.BoolFlag{Name: "global", Usage: "Write the global config (~/.config/gojira/config.yaml); this is the default"},
+			&urfave.BoolFlag{Name: "local", Usage: "Write a project-local ./gojira.yaml in the current directory instead of the global config"},
 		},
 		Action: func(ctx context.Context, cmd *urfave.Command) error {
 			return runInit(ctx, cmd, env)
@@ -85,13 +87,43 @@ func runInit(ctx context.Context, cmd *urfave.Command, env map[string]string) er
 	stderr := guardStderr(cmd)
 	stdout := initStdout(cmd)
 
-	// (a) Resolve the target path via the same resolver used by the
-	// guard. An empty result means we cannot proceed without
-	// guessing — bail with a clear message.
-	path := config.NewDefaultXDGResolver().GlobalConfigFile()
-	if path == "" {
-		fmt.Fprintln(stderr, "error: could not resolve global config path: set HOME or XDG_CONFIG_HOME")
-		return &exitErr{code: 1, msg: "no config path"}
+	// (a) Resolve the target path. Default target is the global XDG
+	// config; --local switches to a project-local ./gojira.yaml in
+	// the current working directory. The two flags are mutually
+	// exclusive to make the chosen target unambiguous on the
+	// command line. The local file is written COMPLETE (same fields
+	// as the global one), so it is self-sufficient and does not
+	// depend on a global config existing.
+	wantGlobal := cmd.Bool("global")
+	wantLocal := cmd.Bool("local")
+	if wantGlobal && wantLocal {
+		fmt.Fprintln(stderr, "error: --global and --local are mutually exclusive; pick one")
+		return &exitErr{code: 1, msg: "global and local are mutually exclusive"}
+	}
+
+	var (
+		path    string
+		isLocal bool
+		cwd     string
+	)
+	if wantLocal {
+		var err error
+		cwd, err = os.Getwd()
+		if err != nil {
+			fmt.Fprintf(stderr, "error: resolve working directory: %v\n", err)
+			return &exitErr{code: 1, msg: "getwd", wrap: err}
+		}
+		path = filepath.Join(cwd, config.LocalConfigFileName)
+		isLocal = true
+	} else {
+		// Default OR explicit --global: same resolver the guard
+		// uses. An empty result means we cannot proceed without
+		// guessing — bail with a clear message.
+		path = config.NewDefaultXDGResolver().GlobalConfigFile()
+		if path == "" {
+			fmt.Fprintln(stderr, "error: could not resolve global config path: set HOME or XDG_CONFIG_HOME")
+			return &exitErr{code: 1, msg: "no config path"}
+		}
 	}
 
 	// (b) Refuse to clobber unless --force.
@@ -186,8 +218,88 @@ func runInit(ctx context.Context, cmd *urfave.Command, env map[string]string) er
 		return &exitErr{code: 1, msg: "write", wrap: err}
 	}
 
-	// (g) Success line.
+	// (g) .gitignore safety nudge — local target only. The file
+	// contains a Jira API token in a project directory; it is easy
+	// to accidentally commit. We append a gojira.yaml entry to an
+	// existing .gitignore, or warn loudly when no .gitignore is
+	// present. Failures here are NON-FATAL: the config WAS written.
+	if isLocal {
+		if err := ensureGitignored(cwd, stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "warning: update .gitignore: %v\n", err)
+		}
+	}
+
+	// (h) Success line.
 	fmt.Fprintf(stdout, "wrote config to %s\n", path)
+	return nil
+}
+
+// ensureGitignored adds a "gojira.yaml" entry to ./.gitignore when one
+// is missing, or warns to stderr if no .gitignore exists. It is the
+// safety net for `gojira init --local`, whose output file contains a
+// Jira API token. Behaviour:
+//
+//   - .gitignore exists AND already lists "gojira.yaml" (line-exact,
+//     after TrimSpace): no-op, no message.
+//   - .gitignore exists but does NOT list "gojira.yaml": append the
+//     entry (preceded by a newline when the file does not end in
+//     one) and print "added gojira.yaml to .gitignore" to stdout.
+//   - .gitignore is absent: do NOT create it; print a warning to
+//     stderr instead, leaving the choice (and the file) to the user.
+//
+// Read/write failures are returned for the caller to log as warnings;
+// they are NOT fatal because the config was already written.
+func ensureGitignored(cwd string, stdout, stderr io.Writer) error {
+	gitignorePath := filepath.Join(cwd, ".gitignore")
+	info, err := os.Stat(gitignorePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Fprintln(stderr,
+				"warning: ./gojira.yaml contains your Jira API token; add it to .gitignore to avoid committing it")
+			return nil
+		}
+		return err
+	}
+	if info.IsDir() {
+		// A directory named .gitignore is a user-environment
+		// oddity, not our problem to fix; surface it as a
+		// warning so the user can investigate.
+		fmt.Fprintln(stderr,
+			"warning: ./.gitignore is a directory; cannot add gojira.yaml entry")
+		return nil
+	}
+
+	body, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		return err
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		if strings.TrimSpace(line) == config.LocalConfigFileName {
+			return nil // already ignored — silent no-op
+		}
+	}
+
+	// Append the entry. Ensure a separating newline before the new
+	// line when the existing file does not end in one, so the entry
+	// lands on its own line and the file stays POSIX-clean.
+	var toAppend []byte
+	if len(body) > 0 && body[len(body)-1] != '\n' {
+		toAppend = append(toAppend, '\n')
+	}
+	toAppend = append(toAppend, []byte(config.LocalConfigFileName+"\n")...)
+
+	f, err := os.OpenFile(gitignorePath, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, werr := f.Write(toAppend); werr != nil {
+		_ = f.Close()
+		return werr
+	}
+	if cerr := f.Close(); cerr != nil {
+		return cerr
+	}
+	fmt.Fprintln(stdout, "added gojira.yaml to .gitignore")
 	return nil
 }
 

@@ -4,6 +4,32 @@ All notable changes to gojira are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `gojira init --local` scaffolds a project-local `./gojira.yaml` in the
+  current directory (a complete, self-sufficient config written `0600`),
+  and adds it to `.gitignore` when one is present. `gojira init`
+  (or `--global`) continues to write the global XDG config; the two
+  flags are mutually exclusive and `--local` never touches the global
+  config.
+
+### Changed
+
+- The configuration cascade now layers the global config and a
+  project-local `./gojira.yaml` field-by-field when no `--config` or
+  `$GOJIRA_CONFIG_FILE` is given: `defaults < global config.yaml <
+  local ./gojira.yaml < env < flags`. A local file overrides the
+  global per field and inherits any field it omits.
+  **Behavior change:** previously a local `./gojira.yaml` fully shadowed
+  the global config; now the global config is merged underneath it. An
+  explicit `--config`/`$GOJIRA_CONFIG_FILE` still pins a single file
+  with no layering.
+- The "no configuration found" error now also points at
+  `gojira init --local` and names both the global and project-local
+  config locations.
+
 ## [v0.2.0] — 2026-06-12
 
 ### Added

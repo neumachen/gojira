@@ -152,13 +152,31 @@ flag overrides the env var when both are set.
 Every Jira-touching command (`crawl`, `serve`, `create`, `update`,
 `comment`, `transitions`, `transition`) requires some form of
 configuration before it will contact Jira. The simplest way to provide
-it is the `gojira init` subcommand, which scaffolds a config file at
-the XDG global path (`$XDG_CONFIG_HOME/gojira/config.yaml` or, when
-`XDG_CONFIG_HOME` is unset, `~/.config/gojira/config.yaml`) with
-`0600` permissions because it contains your Jira API token.
+it is the `gojira init` subcommand, which scaffolds a config file with
+`0600` permissions (it contains your Jira API token).
+
+`gojira init` writes the **global** config by default; pass `--local`
+to write a project-local file instead. The two flags are mutually
+exclusive, and `--local` never creates or modifies the global config.
+
+- `gojira init` (or `gojira init --global`) — writes the global
+  config at the XDG path (`$XDG_CONFIG_HOME/gojira/config.yaml` or,
+  when `XDG_CONFIG_HOME` is unset, `~/.config/gojira/config.yaml`).
+- `gojira init --local` — writes a project-local `./gojira.yaml` in
+  the current working directory (similar in spirit to `git init` for
+  the project's gojira config). The file is **complete and
+  self-sufficient**: it carries every required field so it loads on
+  its own, without any global config present.
 
 ```sh
+# Global config (default; writes the XDG config.yaml):
 gojira init \
+  --site https://your.atlassian.net \
+  --user you@example.com \
+  --token <api-token>
+
+# Project-local config (writes ./gojira.yaml, adds it to .gitignore):
+gojira init --local \
   --site https://your.atlassian.net \
   --user you@example.com \
   --token <api-token>
@@ -174,6 +192,13 @@ defaults (`./out` and `127.0.0.1:50051`) when omitted.
 pass `--force`. The written YAML has the same shape as
 [`gojira.example.yaml`](./gojira.example.yaml) and is consumed by the
 same loader the cascade below documents.
+
+> **Security: do not commit `./gojira.yaml`.** The project-local file
+> contains your Jira API token. `gojira init --local` writes it with
+> `0600` permissions and, when a `./.gitignore` is present, appends
+> `gojira.yaml` to it (and prints what it did). When no `.gitignore`
+> exists, it warns you to ignore the file yourself. Treat
+> `./gojira.yaml` like any other credentials file.
 
 ### How a command finds its configuration
 
@@ -194,34 +219,71 @@ exempt from this guard so they remain usable from a no-config state.
 
 ## Configuration
 
-gojira supports three configuration surfaces — embedded defaults, an
-optional YAML config file, and `GOJIRA_*` environment variables — plus
-the CLI flags documented above. They compose into one effective
-configuration through a documented cascade:
+gojira supports three configuration surfaces — embedded defaults, one
+or two YAML config files (a global and an optional project-local
+file), and `GOJIRA_*` environment variables — plus the CLI flags
+documented above. They compose into one effective configuration
+through a documented cascade:
 
 ```text
-embedded defaults < YAML config file < GOJIRA_* env vars < CLI flags
+embedded defaults < XDG global config.yaml < local ./gojira.yaml < GOJIRA_* env vars < CLI flags
 ```
 
 A value at any layer overrides the same value at every lower layer; a
 value absent at every layer keeps its embedded default.
 
+When no `--config` flag and no `$GOJIRA_CONFIG_FILE` are given, gojira
+**layers the global config (`~/.config/gojira/config.yaml`) and the
+project-local `./gojira.yaml` field-by-field**: the local file
+overrides the global on a per-field basis, and any field absent from
+the local file is inherited from the global config. This is true
+XDG-style layering with local-first precedence, so a project can pin
+just the handful of values it cares about (e.g. a different
+`output.dir` or `crawl.concurrency`) and inherit the rest of the
+global config unchanged.
+
+An explicit `--config <path>` (or `$GOJIRA_CONFIG_FILE`) **pins
+exactly that one file with no layering**: gojira loads only that
+file and does not also read the global or local config. This is the
+escape hatch for CI, scripts, and any case where you want a fully
+deterministic single-file load.
+
 ### Config-file discovery
 
-When the YAML file is not supplied explicitly, gojira searches the
-following locations in order and uses the first existing regular file:
+There are two discovery modes, depending on whether the load is
+explicitly pinned or left to discovery:
+
+**Explicit single-file pin (first match wins, no layering).** When
+either of the explicit candidates is set, gojira uses exactly that
+file and stops — it does NOT also read the global or local config:
 
 1. `--config <path>` (CLI flag)
 2. `$GOJIRA_CONFIG_FILE`
-3. `./gojira.yaml` (current working directory)
-4. `$XDG_CONFIG_HOME/gojira/config.yaml`
-5. `~/.config/gojira/config.yaml`
 
-Candidates 1 and 2 are **explicit**: when set but the file does not
-exist, gojira exits with a hard error so a misconfigured invocation
-fails fast. Candidates 3-5 are **implicit**: a missing file there
-simply falls through to the next candidate, and a fully absent chain
-falls through to defaults plus environment variables (not an error).
+Both are **explicit**: when set but the file does not exist, gojira
+exits with a hard error so a misconfigured invocation fails fast.
+
+**Pure discovery (global + local layered).** When neither explicit
+candidate is set, gojira layers the following files (each missing
+file is silently skipped; a fully absent chain falls through to
+defaults plus environment variables, not an error):
+
+3. `./gojira.yaml` — project-local (current working directory).
+   Written by `gojira init --local`.
+4. `$XDG_CONFIG_HOME/gojira/config.yaml` — XDG global, when
+   `XDG_CONFIG_HOME` is set.
+5. `~/.config/gojira/config.yaml` — XDG global fallback.
+
+In pure discovery, the global config (4 or 5, whichever exists) is
+loaded **first** and the local `./gojira.yaml` (3) is layered on top
+field-by-field. Either may be absent; if both exist, local fields
+override global ones and global fills any gaps the local file leaves.
+
+> **Behavior change in v0.2.0.** Previously a `./gojira.yaml` in pure
+> discovery fully shadowed the global config (winner-takes-all). The
+> two files are now merged: global is read first and local is layered
+> over it per field. To restore the old single-file load semantics,
+> point `--config` (or `$GOJIRA_CONFIG_FILE`) at the file you want.
 
 A starter file lives at [`gojira.example.yaml`](./gojira.example.yaml).
 Copy it to one of the locations above, edit the values you care about,

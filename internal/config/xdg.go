@@ -126,6 +126,50 @@ func (r *XDGResolver) GlobalConfigFile() string {
 	return ""
 }
 
+// LocalConfigFile returns the path to the project-local config file
+// candidate — `<cwd>/gojira.yaml` — mirroring candidate 3 of
+// [DiscoverConfigFile]. When [os.Getwd] fails (a rare sandboxed
+// edge case), it returns an empty string so the caller can skip
+// the local candidate cleanly rather than fabricating a bogus
+// relative path.
+//
+// LocalConfigFile is the seam [LoadApp] uses to apply the
+// local-over-global layering: it needs the implicit local path
+// independent of [DiscoverConfigFile], which collapses both
+// implicit candidates into a single first-hit result.
+func (r *XDGResolver) LocalConfigFile() string {
+	if r == nil {
+		return ""
+	}
+	cwd, err := os.Getwd()
+	if err != nil || cwd == "" {
+		return ""
+	}
+	return filepath.Join(cwd, LocalConfigFileName)
+}
+
+// ConfigFileFromEnv reports whether `$GOJIRA_CONFIG_FILE` is set
+// and non-empty, returning its value when so. The bool distinguishes
+// "unset/empty" (false → fall through to the implicit candidates)
+// from "set" (true → pin this single file; treated by [LoadApp] as
+// an explicit user request, the same as the --config flag, with NO
+// global+local layering).
+//
+// This helper exists so [LoadApp] can decide whether the user
+// pinned a single file (no layering) without re-implementing the
+// resolver's env-var lookup; [DiscoverConfigFile] already consumes
+// the same variable in arm 2.
+func (r *XDGResolver) ConfigFileFromEnv() (string, bool) {
+	if r == nil {
+		return "", false
+	}
+	v, ok := r.lookup(EnvGojiraConfigFile)
+	if !ok || v == "" {
+		return "", false
+	}
+	return v, true
+}
+
 // DiscoverConfigFile returns the path of the first existing
 // configuration file in the documented resolution order:
 //

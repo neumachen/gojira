@@ -69,12 +69,17 @@ func requireConfig(cmd *urfave.Command, env map[string]string) error {
 	}
 
 	// All four arms failed → print the actionable message and bail
-	// with exit code 1.
+	// with exit code 1. The message names BOTH config locations
+	// (global and project-local) and BOTH `init` variants, so the
+	// user knows the local-config option exists without having to
+	// re-read --help.
 	stderr := guardStderr(cmd)
 	fmt.Fprint(stderr,
 		"error: no gojira configuration found.\n"+
 			"\n"+
-			"Run 'gojira init' to create one, or provide configuration via one of:\n"+
+			"Run 'gojira init' to create a global config (~/.config/gojira/config.yaml),\n"+
+			"or 'gojira init --local' to create a project-local ./gojira.yaml, or provide\n"+
+			"configuration via one of:\n"+
 			"  - the --config <path> flag\n"+
 			"  - the --site, --user, and --token flags together\n"+
 			"  - the GOJIRA_CONFIG_FILE env var, or GOJIRA_SITE + GOJIRA_USER + GOJIRA_TOKEN env vars\n")

@@ -94,44 +94,19 @@ type LoadOptions struct {
 func LoadApp(opts LoadOptions) (App, error) {
 	app := DefaultApp()
 
-	yamlReader, discoveredPath, err := resolveYAMLReader(opts)
-	if err != nil {
+	// File layer. The "single source" path covers three cases that
+	// must NOT layer global+local on top of each other:
+	//
+	//   - opts.YAML != nil (programmatic in-memory override);
+	//   - opts.ConfigPath != "" (the --config flag pin);
+	//   - $GOJIRA_CONFIG_FILE set (the env-var pin).
+	//
+	// The remaining case — pure discovery, no pin — layers the
+	// global config first, then the project-local ./gojira.yaml on
+	// top, so a local file overrides per FIELD instead of replacing
+	// the global file wholesale.
+	if err := applyFileLayer(opts, &app); err != nil {
 		return App{}, err
-	}
-	if yamlReader != nil {
-		defer func() {
-			// Close errors on a read-only file handle that we
-			// have already fully consumed are not actionable;
-			// surface them through the loader's own error path
-			// if they happen. The rules require checking every
-			// error explicitly, hence the defer-with-anon-fn.
-			if closer, ok := yamlReader.(io.Closer); ok {
-				_ = closer.Close()
-			}
-		}()
-
-		buf, err := io.ReadAll(yamlReader)
-		if err != nil {
-			return App{}, errext.WrapPrefix(err, "config: read YAML", 0)
-		}
-		if len(bytes.TrimSpace(buf)) > 0 {
-			rawMap, err := decodeYAMLToMap(bytes.NewReader(buf))
-			if err != nil {
-				return App{}, err
-			}
-			if err := ValidateRawConfig(rawMap); err != nil {
-				return App{}, err
-			}
-			if err := decodeYAML(bytes.NewReader(buf), &app); err != nil {
-				return App{}, err
-			}
-		}
-		// Backfill ConfigFile when discovery (not the caller-
-		// supplied reader) located the file; programmatic callers
-		// who pass YAML directly leave ConfigFile empty.
-		if app.ConfigFile == "" && discoveredPath != "" {
-			app.ConfigFile = discoveredPath
-		}
 	}
 
 	if opts.Env != nil {
@@ -192,64 +167,36 @@ func LoadFileLayer(configPath string, resolver *XDGResolver) (App, error) {
 		Resolver:   resolver,
 	}
 	app := DefaultApp()
-
-	yamlReader, discoveredPath, err := resolveYAMLReader(opts)
-	if err != nil {
+	if err := applyFileLayer(opts, &app); err != nil {
 		return App{}, err
-	}
-	if yamlReader == nil {
-		return app, nil
-	}
-	defer func() {
-		if closer, ok := yamlReader.(io.Closer); ok {
-			_ = closer.Close()
-		}
-	}()
-
-	buf, err := io.ReadAll(yamlReader)
-	if err != nil {
-		return App{}, errext.WrapPrefix(err, "config: read YAML", 0)
-	}
-	if len(bytes.TrimSpace(buf)) == 0 {
-		return app, nil
-	}
-
-	rawMap, err := decodeYAMLToMap(bytes.NewReader(buf))
-	if err != nil {
-		return App{}, err
-	}
-	if err := ValidateRawConfig(rawMap); err != nil {
-		return App{}, err
-	}
-	if err := decodeYAML(bytes.NewReader(buf), &app); err != nil {
-		return App{}, err
-	}
-	if app.ConfigFile == "" && discoveredPath != "" {
-		app.ConfigFile = discoveredPath
 	}
 	return app, nil
 }
 
-// resolveYAMLReader picks the YAML source for [LoadApp]: either the
-// caller-supplied opts.YAML reader (which wins outright and skips
-// discovery) or an [os.File] opened by the [XDGResolver] from a
-// discovered path. The second return value is the path that was
-// discovered (empty when the caller supplied YAML directly or when
-// no file was found), which [LoadApp] backfills onto App.ConfigFile
-// for diagnostics.
+// applyFileLayer implements the file layer of the cascade described
+// in [LoadApp]'s doc comment. The dispatch is:
 //
-// The "explicit but missing" branch is the only branch that
-// produces a hard error here: an opts.ConfigPath that points at a
-// non-existent file is treated as a misconfiguration the user must
-// see. An empty opts.ConfigPath with no file discovered anywhere is
-// a successful fall-through (the loader proceeds with defaults +
-// env only).
-func resolveYAMLReader(opts LoadOptions) (io.Reader, string, error) {
-	// Programmatic override path: a non-nil reader bypasses
-	// discovery entirely so Phase 3 callers (tests, embedded
-	// services) keep their exact behavior.
+//  1. opts.YAML != nil → decode that reader as the SOLE source. No
+//     discovery, no layering. Phase 3 back-compat.
+//  2. opts.ConfigPath != "" → open and decode that single file. The
+//     "explicit but missing" branch is a hard error (wraps
+//     [ErrInvalidValue]). No layering — the user pinned this file.
+//  3. $GOJIRA_CONFIG_FILE set → same single-file pin semantics as
+//     (2): the env-var-pinned file is decoded as the only source,
+//     missing → hard error, no layering.
+//  4. Pure discovery → decode the GLOBAL XDG config (if it exists),
+//     then decode the project-local ./gojira.yaml on top (if it
+//     exists). Each file goes through Layer-1 schema validation
+//     independently. App.ConfigFile is set to the most-specific
+//     contributing file (local > global). If neither exists this
+//     is a successful no-op fall-through.
+//
+// The helper writes through *app in place so callers don't have to
+// thread the App value through every error path.
+func applyFileLayer(opts LoadOptions, app *App) error {
+	// (1) Programmatic in-memory reader.
 	if opts.YAML != nil {
-		return opts.YAML, "", nil
+		return applyYAMLReader(opts.YAML, "", app)
 	}
 
 	resolver := opts.Resolver
@@ -257,30 +204,98 @@ func resolveYAMLReader(opts LoadOptions) (io.Reader, string, error) {
 		resolver = NewDefaultXDGResolver()
 	}
 
-	path, found := resolver.DiscoverConfigFile(opts.ConfigPath)
-	switch {
-	case found:
-		// Open returns *os.File which implements io.ReadCloser.
-		f, err := os.Open(path)
-		if err != nil {
-			return nil, "", errext.WrapPrefix(err,
-				"config: open discovered config file "+path, 0)
+	// (2) --config flag: single pinned file.
+	if opts.ConfigPath != "" {
+		return applyPinnedFile(opts.ConfigPath, app)
+	}
+
+	// (3) $GOJIRA_CONFIG_FILE: single pinned file.
+	if envPath, ok := resolver.ConfigFileFromEnv(); ok {
+		return applyPinnedFile(envPath, app)
+	}
+
+	// (4) Discovery layering: global first, then local on top.
+	// Each candidate is independently stat-checked; non-existence
+	// is silent (the cascade simply falls through), in contrast to
+	// the pinned-but-missing case above.
+	if g := resolver.GlobalConfigFile(); g != "" && isRegularFile(g) {
+		if err := applyYAMLFile(g, app); err != nil {
+			return err
 		}
-		return f, path, nil
-	case path != "":
-		// Discovery returned a non-empty path with found=false:
-		// the user explicitly asked for opts.ConfigPath or set
-		// GOJIRA_CONFIG_FILE, but the file does not exist. This
-		// is a hard error, wrapping ErrInvalidValue so existing
-		// errors.Is callers still classify it correctly.
-		return nil, "", fmt.Errorf(
+	}
+	if l := resolver.LocalConfigFile(); l != "" && isRegularFile(l) {
+		if err := applyYAMLFile(l, app); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyPinnedFile opens path read-only and applies it as the SOLE
+// file source, treating a missing file as the hard "explicit but
+// missing" error wrapping [ErrInvalidValue]. This is the shared
+// implementation for the --config flag and $GOJIRA_CONFIG_FILE
+// branches of [applyFileLayer].
+func applyPinnedFile(path string, app *App) error {
+	if !isRegularFile(path) {
+		return fmt.Errorf(
 			"%w: requested config file does not exist: %s",
 			ErrInvalidValue, path)
-	default:
-		// Nothing requested, nothing found: fall through to the
-		// defaults+env layers. No error.
-		return nil, "", nil
 	}
+	return applyYAMLFile(path, app)
+}
+
+// applyYAMLFile opens path, runs the file's contents through
+// Layer-1 schema validation, then decodes it onto *app layering on
+// top of any pre-existing field values. The path is backfilled onto
+// app.ConfigFile (overwriting any prior value) so the most-recently
+// applied file is the one reported for diagnostics — which matches
+// the local-over-global layering rule (local wins, so local is the
+// "owner" reported by App.ConfigFile).
+//
+// An empty or whitespace-only file is a no-op: defaults / prior
+// layered fields are preserved. Schema-validation and decode errors
+// are returned verbatim so the existing error wrapping (and
+// [ErrInvalidValue] sentinel) flows out unchanged.
+func applyYAMLFile(path string, app *App) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return errext.WrapPrefix(err,
+			"config: open discovered config file "+path, 0)
+	}
+	defer func() { _ = f.Close() }()
+	return applyYAMLReader(f, path, app)
+}
+
+// applyYAMLReader reads the entire YAML stream from r, validates it
+// against the embedded JSON Schema (Layer 1), then decodes it onto
+// *app. When discoveredPath is non-empty it is recorded on
+// app.ConfigFile (overwriting any prior value) so diagnostics
+// report the most-recent contributing file. An empty / whitespace-
+// only stream is a no-op so empty config files do not erase
+// defaults or prior layered values.
+func applyYAMLReader(r io.Reader, discoveredPath string, app *App) error {
+	buf, err := io.ReadAll(r)
+	if err != nil {
+		return errext.WrapPrefix(err, "config: read YAML", 0)
+	}
+	if len(bytes.TrimSpace(buf)) == 0 {
+		return nil
+	}
+	rawMap, err := decodeYAMLToMap(bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	if err := ValidateRawConfig(rawMap); err != nil {
+		return err
+	}
+	if err := decodeYAML(bytes.NewReader(buf), app); err != nil {
+		return err
+	}
+	if discoveredPath != "" {
+		app.ConfigFile = discoveredPath
+	}
+	return nil
 }
 
 // decodeYAML decodes a YAML document from r into into, layering on

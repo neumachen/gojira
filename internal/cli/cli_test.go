@@ -145,14 +145,75 @@ func TestRun_NoArgs(t *testing.T) {
 	}
 }
 
+// TestShortUsage_ListsAllSubcommands locks in the no-args usage
+// block printed by printShortUsage. The legacy block advertised only
+// `crawl`, which buried 8 other subcommands behind --help. This
+// regression test asserts that every subcommand the binary registers
+// is named in the usage block, along with the binary version and
+// the standard --help/--version pointers. Assertions are per-command
+// (assert.Contains, not a brittle full-string equality) so future
+// description tweaks don't break the test.
+func TestShortUsage_ListsAllSubcommands(t *testing.T) {
+	stdout, stderr, code := captureRun(context.Background(),
+		[]string{"gojira"}, nil)
+	assert.NotEqual(t, 0, code, "no-args invocation must exit non-zero")
+
+	// printShortUsage writes to stderr (see run() in cli.go), but
+	// be defensive — concatenate both streams so a future move to
+	// stdout doesn't silently make this test pass for the wrong
+	// reason.
+	combined := stdout + stderr
+
+	// Every subcommand currently registered on the root must appear
+	// by NAME in the usage listing. Keep this list in sync with
+	// buildRootCommand's Commands slice.
+	subcommands := []string{
+		"crawl", "serve", "mcp", "init",
+		"create", "update", "comment",
+		"transitions", "transition",
+	}
+	for _, name := range subcommands {
+		assert.Contains(t, combined, name,
+			"short usage must mention subcommand %q; got:\n%s",
+			name, combined)
+	}
+
+	// And the standard pointers a user needs to dig deeper.
+	assert.Contains(t, combined, gojira.Version,
+		"short usage must include the binary version")
+	assert.Contains(t, combined, "--help",
+		"short usage must point at --help")
+	assert.Contains(t, combined, "--version",
+		"short usage must point at --version")
+}
+
 // ---------------------------------------------------------------------------
-// Test 2: --help → exit 0, stdout contains "gojira crawl"
+// Test 2: --help → exit 0, stdout surveys the full command surface
 // ---------------------------------------------------------------------------
 
 func TestRun_HelpFlag(t *testing.T) {
 	stdout, _, code := captureRun(context.Background(), []string{"gojira", "--help"}, nil)
 	assert.Equal(t, 0, code, "expected exit 0")
-	assert.Contains(t, stdout, "gojira crawl", "expected 'gojira crawl' in stdout")
+
+	// The Description paragraph must still mention crawl (the
+	// headline subcommand) AND name the secondary subcommands so
+	// help readers see more than crawl at a glance. Asserting each
+	// subcommand independently lets the wording shift without
+	// breaking the test, the same way TestShortUsage_ListsAllSubcommands
+	// does for the no-args path.
+	assert.Contains(t, stdout, "crawl subcommand",
+		"--help should still describe the crawl subcommand")
+	for _, name := range []string{
+		"crawl", "serve", "mcp", "init",
+		"create", "update", "comment",
+		"transitions", "transition",
+	} {
+		assert.Contains(t, stdout, name,
+			"--help output should mention subcommand %q", name)
+	}
+	// Exit-code legend is part of the contract — keep it locked in.
+	assert.Contains(t, stdout, "Exit codes:",
+		"--help should retain the crawl exit-code legend")
 }
 
 // ---------------------------------------------------------------------------

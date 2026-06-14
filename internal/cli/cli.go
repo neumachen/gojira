@@ -301,10 +301,14 @@ func buildRootCommand(env map[string]string, signalled *atomic.Bool, unknownSubc
 		Usage:   "Jira-to-Markdown mirror tool",
 		Version: gojira.Version,
 		// Description appears in --help between the NAME line and the
-		// flags/commands block. We bake the literal "gojira crawl"
-		// usage line into it so the help output advertises the canonical
-		// invocation form.
-		Description: `gojira crawl [flags] <ISSUE-KEY>
+		// flags/commands block. The opening paragraph surveys the
+		// whole command surface so help readers see more than crawl
+		// at a glance; the crawl-specific paragraph + the exit-code
+		// legend below it remain because crawl is still the headline
+		// command and the codes accurately describe its behaviour.
+		Description: `gojira mirrors Jira Cloud into Markdown and exposes the same engine over
+a gRPC server (serve), an MCP server (mcp), and issue write operations.
+Run 'gojira <command> --help' for command-specific flags.
 
 The crawl subcommand fetches a Jira issue and all issues reachable from
 it, writing Markdown files to the configured output directory.
@@ -789,14 +793,31 @@ func mapCrawlOutcome(stderr io.Writer, summary gojira.Summary, crawlErr error, c
 // Short usage (early-exit when no subcommand is given)
 // ---------------------------------------------------------------------------
 
-// printShortUsage writes a compact usage line to w. This is used when the
-// binary is invoked with no arguments at all — the case where we cannot
-// hand off to urfave.Run without it deciding to print help and exit 0.
+// printShortUsage writes a compact usage block to w. This is used when
+// the binary is invoked with no arguments at all — the case where we
+// cannot hand off to urfave.Run without it deciding to print help and
+// exit 0. The block enumerates the full command surface so users
+// discover non-crawl subcommands (init, serve, mcp, …) without having
+// to read --help first. Command descriptions here mirror each
+// command's own Usage field; do not invent capabilities.
 func printShortUsage(w io.Writer) {
 	fmt.Fprintf(w, `gojira %s — Jira-to-Markdown mirror tool
 
 Usage:
-  gojira crawl [flags] <ISSUE-KEY>
+  gojira <command> [flags] [args]
+
+Commands:
+  crawl         Fetch a Jira issue and recursively mirror its graph to Markdown
+  serve         Run the gojira gRPC server
+  mcp           Run the gojira MCP server over stdio
+  init          Create a gojira config file (--local for a project-local ./gojira.yaml)
+  create        Create a new Jira issue
+  update        Edit fields on an existing Jira issue
+  comment       Add a comment to a Jira issue
+  transitions   List the workflow transitions currently available for an issue
+  transition    Move an issue through a workflow transition
+
+Run 'gojira <command> --help' for command-specific flags.
   gojira --help
   gojira --version
 `, gojira.Version)

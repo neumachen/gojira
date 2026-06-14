@@ -80,7 +80,7 @@ import (
 
 // Version is the current library version. The authoritative release tag is
 // set in Phase 7; this constant is declared early so callers can read it.
-const Version = "v0.2.0"
+const Version = "v0.3.0"
 
 // ---------------------------------------------------------------------------
 // Type aliases — expose internal types under the gojira package name

@@ -96,7 +96,31 @@ jobs:
       contents: read
       packages: write
     steps:
+      # fetch-depth: 0 pulls full history AND tags. scripts/set_version.sh
+      # below needs `git describe --tags --exact-match` (to detect a release
+      # tag on HEAD) and `git rev-parse --abbrev-ref HEAD` (branch fallback);
+      # the default shallow clone (depth 1, no tags) would break the tag
+      # case and stamp a branch name onto what is actually a tagged release.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Rewrite internal/buildinfo/buildinfo.go in the build context so the
+      # binary compiled inside the Docker builder stage reports the real
+      # release identity (tag on tag pushes, branch on main pushes).
+      #
+      # This mutates the runner workspace ONLY — nothing is committed here.
+      # The durable `go install ...@vX.Y.Z` path is handled by the separate
+      # manual release-commit flow (see scripts/set_version.sh header), not
+      # by this workflow.
+      #
+      # Intentionally NOT added to the `test` job above or to ci.yml: those
+      # are correctness gates and must run against un-mutated source. PRs
+      # therefore never trigger stamping.
+      - name: Stamp build version into source
+        run: |
+          chmod +x scripts/set_version.sh
+          ./scripts/set_version.sh
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -137,12 +161,12 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # steps.meta.outputs.version resolves to the git tag on tag builds
-          # (so the embedded gojira.Version stamps the real release, e.g.
-          # v0.1.0) and to a ref-derived string on main builds (acceptable
-          # for the floating `latest`/`main` dev images).
-          build-args: |
-            GOJIRA_VERSION=${{ steps.meta.outputs.version }}
+          # No GOJIRA_VERSION build-arg: gojira.Version is now a func backed
+          # by unexported consts in internal/buildinfo, which -ldflags -X
+          # cannot reach (it can only set string vars). Version identity is
+          # baked into committed source and stamped above by
+          # scripts/set_version.sh before the build context is sent to
+          # buildx. One mechanism, one source of truth.
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false

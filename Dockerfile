@@ -34,9 +34,17 @@
 #   GO_VERSION       Go toolchain version used by the builder.
 #                    Pinned to the version declared in go.mod.
 #   ALPINE_VERSION   Alpine version for both stages.
-#   GOJIRA_VERSION   String embedded in the binary's version output.
-#                    Defaults to "dev" so unstamped local builds are
-#                    obvious; CI should pass the real release tag.
+#
+# Version identity
+#
+#   The binary's version/revision is NOT injected via -ldflags here. It
+#   lives in committed source under internal/buildinfo (unexported consts
+#   `commit` and `ref`) and is rewritten at release time by
+#   scripts/set_version.sh. The CD workflow runs that script against the
+#   build context BEFORE invoking `docker build`, so whatever this image
+#   reports for `gojira --version` reflects whatever the build context
+#   source contained at COPY time. A local `docker build .` against an
+#   un-stamped checkout will therefore correctly report "dev".
 
 # -----------------------------------------------------------------------
 # Stage 1: build
@@ -76,7 +84,11 @@ COPY . .
 #                  build-host filesystem layout.
 #   -buildvcs=false : skip embedding VCS state from the build context
 #                  so the build works against a tarball checkout too.
-ARG GOJIRA_VERSION=dev
+#
+# No `-X` linker override is set: gojira.Version is a func (not a var) and
+# the underlying stamped values are unexported consts in internal/buildinfo
+# — neither is reachable by -ldflags -X. Version stamping happens upstream
+# in the build context (see header comment).
 ARG TARGETOS
 ARG TARGETARCH
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -87,7 +99,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     GOFLAGS=-buildvcs=false \
     go build \
         -trimpath \
-        -ldflags="-s -w -X 'github.com/neumachen/gojira.Version=${GOJIRA_VERSION}'" \
+        -ldflags="-s -w" \
         -o /out/gojira \
         ./cmd/gojira
 

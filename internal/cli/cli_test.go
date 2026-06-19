@@ -179,7 +179,7 @@ func TestShortUsage_ListsAllSubcommands(t *testing.T) {
 	}
 
 	// And the standard pointers a user needs to dig deeper.
-	assert.Contains(t, combined, gojira.Version,
+	assert.Contains(t, combined, gojira.Version(),
 		"short usage must include the binary version")
 	assert.Contains(t, combined, "--help",
 		"short usage must point at --help")
@@ -225,8 +225,8 @@ func TestRun_Version(t *testing.T) {
 	assert.Equal(t, 0, code, "expected exit 0")
 	// Track the canonical version constant rather than a hardcoded
 	// string so the assertion does not drift on every minor bump.
-	assert.Contains(t, stdout, gojira.Version,
-		"expected gojira.Version %q in stdout", gojira.Version)
+	assert.Contains(t, stdout, gojira.Version(),
+		"expected gojira.Version %q in stdout", gojira.Version())
 }
 
 // ---------------------------------------------------------------------------

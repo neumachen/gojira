@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/neumachen/errext"
+	"github.com/neumachen/gojira/internal/buildinfo"
 	"github.com/neumachen/gojira/internal/config"
 	"github.com/neumachen/gojira/internal/httplog"
 )
@@ -59,9 +60,6 @@ var (
 	ErrConflict = errors.New("client: conflict (409)")
 )
 
-// userAgent is sent on every request.
-const userAgent = "gojira/0.1.0"
-
 // Default retry and backoff constants.
 const (
 	defaultMaxRateLimitRetries  = 5
@@ -78,6 +76,12 @@ type Client struct {
 	httpClient *http.Client
 	siteURL    *url.URL
 	authHeader string // pre-computed "Basic <base64(user:token)>"
+
+	// userAgent is the value sent in the User-Agent header on every
+	// request. New defaults it to buildinfo.UserAgent() before applying
+	// options, so every client reports the stamped build identity unless
+	// the caller overrides via WithUserAgent.
+	userAgent string
 
 	// logger, when non-nil, drives the logging RoundTripper installed
 	// in New for crawl observability. Nil means no HTTP request logging
@@ -132,6 +136,22 @@ func WithLogger(lg *slog.Logger) Option {
 	return func(c *Client) { c.logger = lg }
 }
 
+// WithUserAgent overrides the default User-Agent header value sent on every
+// request. The default is [buildinfo.UserAgent], so the stamped build
+// identity is reported automatically; this option is provided for callers
+// (typically downstream library consumers) that need to advertise their
+// own product name in the header.
+//
+// An empty string is ignored so callers cannot accidentally clobber the
+// default with a zero value.
+func WithUserAgent(ua string) Option {
+	return func(c *Client) {
+		if ua != "" {
+			c.userAgent = ua
+		}
+	}
+}
+
 // WithMaxRetries sets the maximum number of 429 retry attempts.
 func WithMaxRetries(n int) Option {
 	return func(c *Client) {
@@ -183,6 +203,7 @@ func New(cfg config.Config, opts ...Option) (*Client, error) {
 		httpClient:           &http.Client{Timeout: 30 * time.Second},
 		siteURL:              siteURL,
 		authHeader:           auth,
+		userAgent:            buildinfo.UserAgent(),
 		maxRateLimitRetries:  defaultMaxRateLimitRetries,
 		maxNetworkRetries:    defaultMaxNetworkRetries,
 		rateLimitBaseBackoff: defaultRateLimitBaseBackoff,
@@ -657,7 +678,7 @@ func (c *Client) newGet(ctx context.Context, rawURL string) (*http.Request, erro
 		return nil, err
 	}
 	req.Header.Set("Authorization", c.authHeader)
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "application/json")
 	return req, nil
 }
@@ -671,7 +692,7 @@ func (c *Client) newPostJSON(ctx context.Context, rawURL string, body []byte) (*
 		return nil, err
 	}
 	req.Header.Set("Authorization", c.authHeader)
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 	return req, nil
@@ -689,7 +710,7 @@ func (c *Client) newPutJSON(ctx context.Context, rawURL string, body []byte) (*h
 		return nil, err
 	}
 	req.Header.Set("Authorization", c.authHeader)
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", c.userAgent)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 	return req, nil

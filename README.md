@@ -808,6 +808,9 @@ write path and the Dev Status error branches.
   — the package-boundary design mini-doc.
 - [docs/engineering-principles.md](./docs/engineering-principles.md)
   — the rule book contributors and AI agents follow.
+- [docs/releasing.md](./docs/releasing.md)
+  — how gojira's build identity is stamped and how a maintainer
+  cuts a release.
 
 ## License
 

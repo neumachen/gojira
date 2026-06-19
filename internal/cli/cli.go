@@ -299,7 +299,7 @@ func buildRootCommand(env map[string]string, signalled *atomic.Bool, unknownSubc
 	return &urfave.Command{
 		Name:    "gojira",
 		Usage:   "Jira-to-Markdown mirror tool",
-		Version: gojira.Version,
+		Version: gojira.Version(),
 		// EnableShellCompletion injects an auto-generated
 		// `gojira completion <bash|zsh|fish|pwsh>` subcommand
 		// (urfave/cli/v3 ≥ v3.0). The completion logic is derived
@@ -845,7 +845,7 @@ Run 'gojira <command> --help' for command-specific flags.
 Run 'gojira completion <bash|zsh|fish|pwsh>' to generate shell completions.
   gojira --help
   gojira --version
-`, gojira.Version)
+`, gojira.Version())
 }
 
 // ---------------------------------------------------------------------------

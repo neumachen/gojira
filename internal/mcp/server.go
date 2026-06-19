@@ -54,7 +54,7 @@ const ModeBridge = "bridge"
 func NewMCPServer(b mcpBackend, allowWrites bool) *mcpsdk.Server {
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    "gojira",
-		Version: gojira.Version,
+		Version: gojira.Version(),
 	}, nil)
 	registerTools(server, b, allowWrites)
 	return server

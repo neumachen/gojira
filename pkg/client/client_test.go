@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/neumachen/gojira/internal/buildinfo"
 	"github.com/neumachen/gojira/internal/config"
 	"github.com/neumachen/gojira/pkg/client"
 	gojiralog "github.com/neumachen/gojira/pkg/log"
@@ -82,7 +83,7 @@ func TestGetIssue_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, wantBody, string(body), "body")
 	assert.Equal(t, expectedAuthHeader(), gotAuth, "Authorization")
-	assert.Equal(t, "gojira/0.1.0", gotUA, "User-Agent")
+	assert.Equal(t, buildinfo.UserAgent(), gotUA, "User-Agent")
 	assert.Equal(t, "application/json", gotAccept, "Accept")
 }
 
@@ -806,7 +807,7 @@ func TestNewPutJSON_MethodAndHeaders(t *testing.T) {
 
 	assert.Equal(t, http.MethodPut, gotMethod, "method")
 	assert.Equal(t, expectedAuthHeader(), gotAuth, "Authorization")
-	assert.Equal(t, "gojira/0.1.0", gotUA, "User-Agent")
+	assert.Equal(t, buildinfo.UserAgent(), gotUA, "User-Agent")
 	assert.Equal(t, "application/json", gotAccept, "Accept")
 	assert.Equal(t, "application/json", gotContentType, "Content-Type")
 	assert.Equal(t, reqBody, gotBody, "body must round-trip verbatim")

@@ -1,7 +1,13 @@
 // Package buildinfo is the single source of truth for the gojira build
-// identity (git revision and version ref). It is the leaf package that
-// release tooling rewrites at build time, and the only package the rest of
-// the codebase should consult for version reporting.
+// identity (git revision and version ref). It combines two sources:
+//
+//  1. CD stamping: scripts/set_version.sh rewrites the commit/ref consts
+//     transiently in the Docker build context.
+//  2. Go build info: runtime/debug.ReadBuildInfo() provides module version
+//     and VCS metadata when installed via `go install ...@vX.Y.Z`.
+//
+// The functions in this package check CD-stamped values first, then fall
+// back to ReadBuildInfo(), then to "dev" for local development builds.
 //
 // # Stamping model
 //
@@ -12,78 +18,96 @@
 //	(commit\s*=\s*")(.*)(")
 //	(ref\s*=\s*")(.*)(")
 //
-// Because `go install github.com/neumachen/gojira/cmd/gojira@vX` compiles
-// the committed source with no -ldflags, the stamped values MUST live in
-// committed source for the resulting binary to report them correctly.
+// CD stamps these transiently in the build context; committed source always
+// has "dev" and "" respectively.
 //
 // # Import discipline
 //
-// This package imports ONLY the Go standard library (and, in practice, no
-// stdlib packages at all). It is imported by both the root gojira facade
-// (via version.go) and by pkg/client to populate the default User-Agent.
-// Keeping the dependency surface empty guarantees no import cycle can be
-// introduced through this package.
+// This package imports only runtime/debug from the standard library. It is
+// imported by both the root gojira facade (via version.go) and by pkg/client
+// to populate the default User-Agent. Keeping the dependency surface minimal
+// guarantees no import cycle can be introduced through this package.
 package buildinfo
 
+import "runtime/debug"
+
 // commit is the git SHA the binary was built from. It is rewritten by
-// scripts/set_version.sh at release time. Keep this declaration on a single
-// line with the literal on one line — the rewrite script targets the
-// pattern `commit = "..."` exactly.
+// scripts/set_version.sh in the CD build context only. Keep this declaration
+// on a single line — the rewrite script targets the pattern `commit = "..."`
+// exactly. Committed source always has "dev".
 const commit = "dev"
 
-// ref is the git tag a release was cut from, or the branch name when no tag
-// applies. It is empty until rewritten by scripts/set_version.sh. Keep this
-// declaration on a single line with the literal on one line — the rewrite
-// script targets the pattern `ref = "..."` exactly.
+// ref is the git tag or branch name. It is rewritten by scripts/set_version.sh
+// in the CD build context only. Keep this declaration on a single line — the
+// rewrite script targets the pattern `ref = "..."` exactly. Committed source
+// always has "".
 const ref = ""
 
-// Revision returns the git SHA the binary was built from, or "dev" when the
-// binary has not been release-stamped.
+// Revision returns the git SHA the binary was built from.
+//
+// Resolution order:
+//  1. CD-stamped commit const (if not "dev")
+//  2. vcs.revision from debug.ReadBuildInfo() (go install / go build with VCS)
+//  3. "dev" fallback for local builds
 func Revision() string {
-	return commit
+	// CD-stamped value takes precedence
+	if commit != "dev" && commit != "" {
+		return commit
+	}
+	// Try build info (go install or go build with VCS)
+	if info, ok := debug.ReadBuildInfo(); ok {
+		for _, setting := range info.Settings {
+			if setting.Key == "vcs.revision" {
+				return setting.Value
+			}
+		}
+	}
+	return "dev"
 }
 
-// Version returns the human-facing version string. It is the release ref
-// (tag or branch) when stamped, falling back to the commit SHA otherwise.
-// An un-stamped build therefore reports "dev".
+// Version returns the human-facing version string.
+//
+// Resolution order:
+//  1. CD-stamped ref const (if not empty)
+//  2. Main.Version from debug.ReadBuildInfo() (go install ...@vX.Y.Z)
+//  3. CD-stamped commit (if not "dev")
+//  4. "dev" fallback for local builds
 func Version() string {
-	return versionOf(ref, commit)
+	// CD-stamped ref takes precedence
+	if ref != "" {
+		return ref
+	}
+	// Try build info (go install ...@vX.Y.Z)
+	if info, ok := debug.ReadBuildInfo(); ok {
+		v := info.Main.Version
+		if v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	// Fall back to commit if stamped
+	if commit != "dev" && commit != "" {
+		return commit
+	}
+	return "dev"
 }
 
 // FullVersion returns an image-reference-style identifier suitable for log
-// lines and User-Agent strings. Format:
+// lines and diagnostic output. Format:
 //
-//   - stamped:    "<ref>@<commit>" (e.g. "v0.3.0@abc1234")
-//   - un-stamped: "<commit>"       (e.g. "dev")
-//
-// The "@" separator is only emitted when both halves are present; an
-// un-stamped build does not produce a bare "@dev" or "dev@".
+//   - When version and revision differ: "<version>@<revision>" (e.g. "v0.4.1@abc1234")
+//   - Otherwise: "<version>" (e.g. "dev" or "v0.4.1")
 func FullVersion() string {
-	return fullVersionOf(ref, commit)
+	v := Version()
+	r := Revision()
+	// Combine if both are meaningful and different
+	if v != "dev" && r != "dev" && v != r {
+		return v + "@" + r
+	}
+	return v
 }
 
 // UserAgent returns the HTTP User-Agent header value that the gojira HTTP
 // client uses by default. Format: "gojira/" + Version().
 func UserAgent() string {
 	return "gojira/" + Version()
-}
-
-// versionOf is the pure helper behind Version. It is factored out so unit
-// tests can exercise both the stamped and un-stamped branches without
-// mutating package-level consts.
-func versionOf(ref, commit string) string {
-	if ref != "" {
-		return ref
-	}
-	return commit
-}
-
-// fullVersionOf is the pure helper behind FullVersion. It is factored out
-// so unit tests can exercise both the stamped and un-stamped branches
-// without mutating package-level consts.
-func fullVersionOf(ref, commit string) string {
-	if ref != "" {
-		return ref + "@" + commit
-	}
-	return commit
 }

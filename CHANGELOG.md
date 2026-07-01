@@ -4,6 +4,13 @@ All notable changes to gojira are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `gojira get <ISSUE-KEY>` — fetch and print a single Jira issue without
+  crawling or writing files; `--format markdown|json` (default markdown).
+
 ## [v0.4.0] — 2026-06-14
 
 ### Added

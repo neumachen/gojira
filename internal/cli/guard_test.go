@@ -200,6 +200,7 @@ func TestGuard_NoConfig_FailsFast_BeforeHTTP(t *testing.T) {
 func TestGuard_NoConfig_FailsForEveryGuardedCommand(t *testing.T) {
 	commands := [][]string{
 		{"gojira", "crawl", "PROJ-1"},
+		{"gojira", "get", "PROJ-1"},
 		{"gojira", "serve"},
 		{"gojira", "create", "--project", "PROJ", "--summary", "x"},
 		{"gojira", "update", "PROJ-1", "--summary", "x"},

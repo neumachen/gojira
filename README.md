@@ -139,6 +139,23 @@ Starting from one Jira issue key, the crawler:
 7. Honours configurable caps on depth, issue count, time, and
    API concurrency.
 
+## Single-issue fetch: `gojira get`
+
+Use `gojira get <ISSUE-KEY>` to fetch exactly one Jira issue without
+any recursive crawling or disk writes:
+
+```sh
+# Print Markdown to stdout (default)
+gojira get PROJ-123
+
+# Print structured JSON to stdout
+gojira get --format json PROJ-123
+```
+
+Unlike `crawl`, `get` never writes files to disk — it prints directly
+to stdout. It does **not** require `GOJIRA_OUTPUT_DIR`. The `--format`
+flag accepts `markdown` (default) or `json`.
+
 ## CLI flags
 
 The `crawl` subcommand accepts these flags. Each maps to an env

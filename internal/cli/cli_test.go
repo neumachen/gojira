@@ -168,7 +168,7 @@ func TestShortUsage_ListsAllSubcommands(t *testing.T) {
 	// by NAME in the usage listing. Keep this list in sync with
 	// buildRootCommand's Commands slice.
 	subcommands := []string{
-		"crawl", "serve", "mcp", "init",
+		"crawl", "get", "serve", "mcp", "init",
 		"create", "update", "comment",
 		"transitions", "transition",
 	}
@@ -204,7 +204,7 @@ func TestRun_HelpFlag(t *testing.T) {
 	assert.Contains(t, stdout, "crawl subcommand",
 		"--help should still describe the crawl subcommand")
 	for _, name := range []string{
-		"crawl", "serve", "mcp", "init",
+		"crawl", "get", "serve", "mcp", "init",
 		"create", "update", "comment",
 		"transitions", "transition",
 	} {

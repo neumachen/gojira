@@ -344,6 +344,7 @@ Exit codes:
   130 Force-quit by second signal.`,
 		Commands: []*urfave.Command{
 			crawlCommand(env, signalled),
+			getCommand(env),
 			serveCommand(env, signalled),
 			createCommand(env),
 			updateCommand(env),
@@ -832,6 +833,7 @@ Usage:
 
 Commands:
   crawl         Fetch a Jira issue and recursively mirror its graph to Markdown
+  get           Fetch a single Jira issue and print it (no crawl, no files written)
   serve         Run the gojira gRPC server
   mcp           Run the gojira MCP server over stdio
   init          Create a gojira config file (--local for a project-local ./gojira.yaml)

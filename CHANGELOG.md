@@ -4,12 +4,15 @@ All notable changes to gojira are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [v0.5.0] — 2026-07-02
 
 ### Added
 
 - `gojira get <ISSUE-KEY>` — fetch and print a single Jira issue without
   crawling or writing files; `--format markdown|json` (default markdown).
+- Version identity is now consolidated in `internal/buildinfo` and derived
+  at runtime from `runtime/debug.ReadBuildInfo()` (git tag / module version),
+  so `gojira --version` reflects the built tag without a hand-edited constant.
 
 ## [v0.4.0] — 2026-06-14
 

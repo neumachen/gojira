@@ -4,6 +4,22 @@ All notable changes to gojira are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.2] — 2026-07-30
+
+### Fixed
+
+- The bare `gojira` invocation (no subcommand) printed a hand-maintained
+  command list that had drifted out of sync and omitted the `release`
+  command group added in v0.6.0. The no-argument usage listing is now
+  derived from the live CLI command tree, so every registered
+  subcommand — and any added later — appears automatically, matching how
+  `gojira <group> --help` is generated. Help output only; no API change.
+
+### Documentation
+
+- The README `go install` example now uses `@latest` instead of a pinned
+  older version.
+
 ## [v0.6.1] — 2026-07-29
 
 ### Security

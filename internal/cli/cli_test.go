@@ -170,7 +170,7 @@ func TestShortUsage_ListsAllSubcommands(t *testing.T) {
 	subcommands := []string{
 		"crawl", "get", "serve", "mcp", "init",
 		"create", "update", "comment",
-		"transitions", "transition",
+		"transitions", "transition", "release",
 	}
 	for _, name := range subcommands {
 		assert.Contains(t, combined, name,

@@ -208,7 +208,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, env map[s
 	// is unambiguous (cli's default for a bare invocation would print
 	// help and exit 0).
 	if len(args) < 2 {
-		printShortUsage(stderr)
+		printShortUsage(stderr, env)
 		return 1
 	}
 
@@ -822,33 +822,43 @@ func mapCrawlOutcome(stderr io.Writer, summary gojira.Summary, crawlErr error, c
 // printShortUsage writes a compact usage block to w. This is used when
 // the binary is invoked with no arguments at all — the case where we
 // cannot hand off to urfave.Run without it deciding to print help and
-// exit 0. The block enumerates the full command surface so users
-// discover non-crawl subcommands (init, serve, mcp, …) without having
-// to read --help first. Command descriptions here mirror each
-// command's own Usage field; do not invent capabilities.
-func printShortUsage(w io.Writer) {
-	fmt.Fprintf(w, `gojira %s — Jira-to-Markdown mirror tool
+// exit 0.
+//
+// The command list is DERIVED from the live command tree built by
+// buildRootCommand, so any subcommand registered there (release, and
+// anything added later) appears here automatically. There is no
+// hand-maintained command list to drift out of sync — this mirrors the
+// way `gojira <group> --help` auto-lists its subcommands from the tree.
+func printShortUsage(w io.Writer, env map[string]string) {
+	var signalled, unknownSubcommand atomic.Bool
+	root := buildRootCommand(env, &signalled, &unknownSubcommand, w, w)
 
-Usage:
-  gojira <command> [flags] [args]
+	fmt.Fprintf(w, "gojira %s — %s\n\n", gojira.Version(), root.Usage)
+	fmt.Fprint(w, "Usage:\n  gojira <command> [flags] [args]\n\nCommands:\n")
 
-Commands:
-  crawl         Fetch a Jira issue and recursively mirror its graph to Markdown
-  get           Fetch a single Jira issue and print it (no crawl, no files written)
-  serve         Run the gojira gRPC server
-  mcp           Run the gojira MCP server over stdio
-  init          Create a gojira config file (--local for a project-local ./gojira.yaml)
-  create        Create a new Jira issue
-  update        Edit fields on an existing Jira issue
-  comment       Add a comment to a Jira issue
-  transitions   List the workflow transitions currently available for an issue
-  transition    Move an issue through a workflow transition
+	// Column-align on the longest visible command name.
+	width := 0
+	for _, c := range root.Commands {
+		if c.Hidden {
+			continue
+		}
+		if n := len(c.Name); n > width {
+			width = n
+		}
+	}
+	for _, c := range root.Commands {
+		if c.Hidden {
+			continue
+		}
+		fmt.Fprintf(w, "  %-*s  %s\n", width, c.Name, c.Usage)
+	}
 
+	fmt.Fprint(w, `
 Run 'gojira <command> --help' for command-specific flags.
 Run 'gojira completion <bash|zsh|fish|pwsh>' to generate shell completions.
   gojira --help
   gojira --version
-`, gojira.Version())
+`)
 }
 
 // ---------------------------------------------------------------------------

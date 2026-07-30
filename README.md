@@ -50,7 +50,7 @@ engine is available as an embeddable Go library.
 ### Go install
 
 ```sh
-go install github.com/neumachen/gojira/cmd/gojira@v0.2.0
+go install github.com/neumachen/gojira/cmd/gojira@latest
 ```
 
 ### Docker

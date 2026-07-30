@@ -4,6 +4,18 @@ All notable changes to gojira are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.1] — 2026-07-29
+
+### Security
+
+- Bump `google.golang.org/grpc` to v1.82.1 to resolve a HIGH-severity
+  advisory (GHSA-hrxh-6v49-42gf: gRPC-Go xDS RBAC and HTTP/2
+  vulnerabilities).
+- Bump `golang.org/x/net` to v0.55.0 to resolve CVE-2026-25680
+  (GHSA-5cv4-jp36-h3mw: Go net/html parser denial of service).
+
+Dependency-only change; no API or behavior changes.
+
 ## [v0.6.0] — 2026-07-29
 
 ### Added

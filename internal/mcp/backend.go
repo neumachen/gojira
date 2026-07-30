@@ -42,23 +42,40 @@ func noopProgress(int, int, string) {}
 // typed flags do not cover; it is mapped onto client.WithField in
 // the facade backend.
 type CreateIssueFields struct {
-	Summary     string
-	Description string
-	Assignee    string
-	Labels      []string
-	ParentKey   string
-	RawFields   map[string]any
+	Summary       string
+	Description   string
+	Assignee      string
+	Labels        []string
+	ParentKey     string
+	FixVersions   []string
+	FixVersionIDs []string
+	RawFields     map[string]any
 }
 
 // UpdateIssueFields is the update_issue analog of [CreateIssueFields].
 // Each field is applied only when non-empty / non-nil so unset values
 // do not clobber existing Jira state with empty strings.
 type UpdateIssueFields struct {
-	Summary     string
+	Summary       string
+	Description   string
+	Assignee      string
+	Labels        []string
+	FixVersions   []string
+	FixVersionIDs []string
+	RawFields     map[string]any
+}
+
+// VersionFields carries the primitive optional inputs a create_version /
+// update_version MCP tool collects. Released and Archived are pointers so
+// an unset flag (nil) is distinguishable from an explicit false — on
+// update this ensures an omitted flag never blanks the existing value.
+// The other fields are applied only when non-empty.
+type VersionFields struct {
 	Description string
-	Assignee    string
-	Labels      []string
-	RawFields   map[string]any
+	Released    *bool
+	Archived    *bool
+	ReleaseDate string
+	StartDate   string
 }
 
 // TransitionFields carries the optional comment that the
@@ -93,4 +110,11 @@ type mcpBackend interface {
 	// [gojira.TransitionIssueByStatus]; the bridge forwards the
 	// equivalent gRPC request and lets the server resolve.
 	TransitionIssue(ctx context.Context, key, transitionID, toStatus string, fields TransitionFields) error
+
+	// Version (release) management. CreateVersion/UpdateVersion return
+	// the resulting [client.Version]; ListVersions is project-scoped
+	// (id or key).
+	CreateVersion(ctx context.Context, name, project string, fields VersionFields) (client.Version, error)
+	UpdateVersion(ctx context.Context, id string, fields VersionFields) (client.Version, error)
+	ListVersions(ctx context.Context, projectIDOrKey string) ([]client.Version, error)
 }

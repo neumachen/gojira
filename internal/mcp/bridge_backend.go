@@ -231,13 +231,15 @@ func (b *bridgeBackend) CreateIssue(ctx context.Context, project, issueType stri
 		return client.CreatedIssue{}, err
 	}
 	resp, err := b.client.CreateIssue(ctx, &gojirav1.CreateIssueRequest{
-		Project:     project,
-		IssueType:   issueType,
-		Summary:     fields.Summary,
-		Description: fields.Description,
-		Labels:      fields.Labels,
-		ParentKey:   fields.ParentKey,
-		RawFields:   rawFields,
+		Project:       project,
+		IssueType:     issueType,
+		Summary:       fields.Summary,
+		Description:   fields.Description,
+		Labels:        fields.Labels,
+		ParentKey:     fields.ParentKey,
+		FixVersions:   fields.FixVersions,
+		FixVersionIds: fields.FixVersionIDs,
+		RawFields:     rawFields,
 	})
 	if err != nil {
 		return client.CreatedIssue{}, err
@@ -271,10 +273,12 @@ func (b *bridgeBackend) UpdateIssue(ctx context.Context, key string, fields Upda
 		rawFields["assignee"] = string(assigneeJSON)
 	}
 	_, err = b.client.UpdateIssue(ctx, &gojirav1.UpdateIssueRequest{
-		Key:         key,
-		Summary:     fields.Summary,
-		Description: fields.Description,
-		RawFields:   rawFields,
+		Key:           key,
+		Summary:       fields.Summary,
+		Description:   fields.Description,
+		FixVersions:   fields.FixVersions,
+		FixVersionIds: fields.FixVersionIDs,
+		RawFields:     rawFields,
 	})
 	return err
 }
@@ -324,6 +328,79 @@ func (b *bridgeBackend) TransitionIssue(ctx context.Context, key, transitionID, 
 		CommentText:      fields.CommentText,
 	})
 	return err
+}
+
+// versionFromProto maps a wire [gojirav1.Version] back into a
+// [client.Version]. A nil input yields a zero Version.
+func versionFromProto(pv *gojirav1.Version) client.Version {
+	if pv == nil {
+		return client.Version{}
+	}
+	return client.Version{
+		ID:          pv.GetId(),
+		Name:        pv.GetName(),
+		ProjectID:   int(pv.GetProjectId()),
+		Description: pv.GetDescription(),
+		Released:    pv.GetReleased(),
+		Archived:    pv.GetArchived(),
+		ReleaseDate: pv.GetReleaseDate(),
+		StartDate:   pv.GetStartDate(),
+		Self:        pv.GetSelf(),
+	}
+}
+
+// derefBool returns the pointed-to bool, or false when the pointer is
+// nil. proto3 cannot express an unset bool, so an unset VersionFields
+// flag maps to false on the wire — the documented gRPC-surface
+// limitation.
+func derefBool(p *bool) bool {
+	return p != nil && *p
+}
+
+func (b *bridgeBackend) CreateVersion(ctx context.Context, name, project string, fields VersionFields) (client.Version, error) {
+	resp, err := b.client.CreateVersion(ctx, &gojirav1.CreateVersionRequest{
+		Name:        name,
+		Project:     project,
+		Description: fields.Description,
+		Released:    derefBool(fields.Released),
+		Archived:    derefBool(fields.Archived),
+		ReleaseDate: fields.ReleaseDate,
+		StartDate:   fields.StartDate,
+	})
+	if err != nil {
+		return client.Version{}, err
+	}
+	return versionFromProto(resp.GetVersion()), nil
+}
+
+func (b *bridgeBackend) UpdateVersion(ctx context.Context, id string, fields VersionFields) (client.Version, error) {
+	// released/archived are `optional` on UpdateVersionRequest, so we
+	// forward the *bool pointers directly: a nil pointer means "unset" and
+	// leaves the existing Jira value unchanged (parity with the CLI/facade).
+	resp, err := b.client.UpdateVersion(ctx, &gojirav1.UpdateVersionRequest{
+		Id:          id,
+		Description: fields.Description,
+		Released:    fields.Released,
+		Archived:    fields.Archived,
+		ReleaseDate: fields.ReleaseDate,
+		StartDate:   fields.StartDate,
+	})
+	if err != nil {
+		return client.Version{}, err
+	}
+	return versionFromProto(resp.GetVersion()), nil
+}
+
+func (b *bridgeBackend) ListVersions(ctx context.Context, projectIDOrKey string) ([]client.Version, error) {
+	resp, err := b.client.ListVersions(ctx, &gojirav1.ListVersionsRequest{Project: projectIDOrKey})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]client.Version, 0, len(resp.GetVersions()))
+	for _, v := range resp.GetVersions() {
+		out = append(out, versionFromProto(v))
+	}
+	return out, nil
 }
 
 // ---------------------------------------------------------------------------

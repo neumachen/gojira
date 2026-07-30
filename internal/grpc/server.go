@@ -61,6 +61,13 @@ type Server struct {
 	// seam lets a test cover both paths with one fake.
 	listTransitionsFn func(ctx context.Context, cfg gojira.Config, key string) ([]client.Transition, error)
 	transitionIssueFn func(ctx context.Context, cfg gojira.Config, key, transitionID string, opts ...client.TransitionOption) error
+
+	// Version-management seams. Default in [NewServer] to closures over
+	// the matching gojira facade functions; overridable via the
+	// With*Func [Option] constructors.
+	createVersionFn func(ctx context.Context, cfg gojira.Config, name, project string, opts ...client.VersionOption) (client.Version, error)
+	updateVersionFn func(ctx context.Context, cfg gojira.Config, id string, opts ...client.VersionOption) (client.Version, error)
+	listVersionsFn  func(ctx context.Context, cfg gojira.Config, projectIDOrKey string) ([]client.Version, error)
 }
 
 // Option mutates a Server during construction. Options are applied
@@ -129,6 +136,24 @@ func WithTransitionIssueFunc(fn func(ctx context.Context, cfg gojira.Config, key
 	return func(s *Server) { s.transitionIssueFn = fn }
 }
 
+// WithCreateVersionFunc overrides the function used by [Server.CreateVersion].
+// The default closes over [gojira.CreateVersion].
+func WithCreateVersionFunc(fn func(ctx context.Context, cfg gojira.Config, name, project string, opts ...client.VersionOption) (client.Version, error)) Option {
+	return func(s *Server) { s.createVersionFn = fn }
+}
+
+// WithUpdateVersionFunc overrides the function used by [Server.UpdateVersion].
+// The default closes over [gojira.UpdateVersion].
+func WithUpdateVersionFunc(fn func(ctx context.Context, cfg gojira.Config, id string, opts ...client.VersionOption) (client.Version, error)) Option {
+	return func(s *Server) { s.updateVersionFn = fn }
+}
+
+// WithListVersionsFunc overrides the function used by [Server.ListVersions].
+// The default closes over [gojira.ListVersions].
+func WithListVersionsFunc(fn func(ctx context.Context, cfg gojira.Config, projectIDOrKey string) ([]client.Version, error)) Option {
+	return func(s *Server) { s.listVersionsFn = fn }
+}
+
 // NewServer constructs a Server with the given runtime configuration and
 // the production gojira facade wired into the injectable seams. Each
 // supplied [Option] is applied after the defaults, allowing tests to
@@ -159,6 +184,15 @@ func NewServer(cfg gojira.Config, opts ...Option) *Server {
 		},
 		transitionIssueFn: func(ctx context.Context, cfg gojira.Config, key, transitionID string, opts ...client.TransitionOption) error {
 			return gojira.TransitionIssue(ctx, cfg, key, transitionID, opts...)
+		},
+		createVersionFn: func(ctx context.Context, cfg gojira.Config, name, project string, opts ...client.VersionOption) (client.Version, error) {
+			return gojira.CreateVersion(ctx, cfg, name, project, opts...)
+		},
+		updateVersionFn: func(ctx context.Context, cfg gojira.Config, id string, opts ...client.VersionOption) (client.Version, error) {
+			return gojira.UpdateVersion(ctx, cfg, id, opts...)
+		},
+		listVersionsFn: func(ctx context.Context, cfg gojira.Config, projectIDOrKey string) ([]client.Version, error) {
+			return gojira.ListVersions(ctx, cfg, projectIDOrKey)
 		},
 	}
 	for _, opt := range opts {
@@ -607,6 +641,12 @@ func (s *Server) CreateIssue(ctx context.Context, req *gojirav1.CreateIssueReque
 	if v := req.GetParentKey(); v != "" {
 		opts = append(opts, client.WithParent(v))
 	}
+	if v := req.GetFixVersions(); len(v) > 0 {
+		opts = append(opts, client.WithFixVersionNames(v...))
+	}
+	if v := req.GetFixVersionIds(); len(v) > 0 {
+		opts = append(opts, client.WithFixVersionIDs(v...))
+	}
 	opts = append(opts, rawFieldsToCreateOpts(req.GetRawFields())...)
 
 	if req.GetDryRun() {
@@ -643,6 +683,12 @@ func (s *Server) UpdateIssue(ctx context.Context, req *gojirav1.UpdateIssueReque
 	}
 	if v := req.GetDescription(); v != "" {
 		opts = append(opts, client.WithDescriptionTextUpdate(v))
+	}
+	if v := req.GetFixVersions(); len(v) > 0 {
+		opts = append(opts, client.WithFixVersionNamesUpdate(v...))
+	}
+	if v := req.GetFixVersionIds(); len(v) > 0 {
+		opts = append(opts, client.WithFixVersionIDsUpdate(v...))
 	}
 	opts = append(opts, rawFieldsToUpdateOpts(req.GetRawFields())...)
 
@@ -756,4 +802,143 @@ func (s *Server) TransitionIssue(ctx context.Context, req *gojirav1.TransitionIs
 		return nil, toStatusError(err)
 	}
 	return &gojirav1.TransitionIssueResponse{Ok: true}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Version (release) management handlers
+// ---------------------------------------------------------------------------
+
+// versionToProto maps a [client.Version] to its wire form.
+func versionToProto(v client.Version) *gojirav1.Version {
+	return &gojirav1.Version{
+		Id:          v.ID,
+		Name:        v.Name,
+		ProjectId:   int64(v.ProjectID),
+		Description: v.Description,
+		Released:    v.Released,
+		Archived:    v.Archived,
+		ReleaseDate: v.ReleaseDate,
+		StartDate:   v.StartDate,
+		Self:        v.Self,
+	}
+}
+
+// createVersionOpts builds the optional VersionOptions from a
+// CreateVersionRequest. released/archived are applied as-is (proto3 has
+// no unset-bool); dates/description only when non-empty.
+func createVersionOpts(req *gojirav1.CreateVersionRequest) []client.VersionOption {
+	opts := make([]client.VersionOption, 0, 5)
+	if v := req.GetDescription(); v != "" {
+		opts = append(opts, client.WithVersionDescription(v))
+	}
+	opts = append(opts, client.WithVersionReleased(req.GetReleased()))
+	opts = append(opts, client.WithVersionArchived(req.GetArchived()))
+	if v := req.GetReleaseDate(); v != "" {
+		opts = append(opts, client.WithVersionReleaseDate(v))
+	}
+	if v := req.GetStartDate(); v != "" {
+		opts = append(opts, client.WithVersionStartDate(v))
+	}
+	return opts
+}
+
+// updateVersionOpts builds the optional VersionOptions from an
+// UpdateVersionRequest. released/archived are `optional` on the proto, so
+// they are applied ONLY when present (mirroring the CLI's cmd.IsSet and the
+// MCP layer's *bool guards) — an omitted value leaves the existing Jira
+// value unchanged rather than silently clearing it. dates/description are
+// applied only when non-empty.
+func updateVersionOpts(req *gojirav1.UpdateVersionRequest) []client.VersionOption {
+	opts := make([]client.VersionOption, 0, 5)
+	if v := req.GetDescription(); v != "" {
+		opts = append(opts, client.WithVersionDescription(v))
+	}
+	if req.Released != nil {
+		opts = append(opts, client.WithVersionReleased(req.GetReleased()))
+	}
+	if req.Archived != nil {
+		opts = append(opts, client.WithVersionArchived(req.GetArchived()))
+	}
+	if v := req.GetReleaseDate(); v != "" {
+		opts = append(opts, client.WithVersionReleaseDate(v))
+	}
+	if v := req.GetStartDate(); v != "" {
+		opts = append(opts, client.WithVersionStartDate(v))
+	}
+	return opts
+}
+
+// CreateVersion creates a new project version (release). name and project
+// are required. When dry_run is set the server returns the JSON body it
+// would POST (in dry_run_body) and the createVersionFn seam is NOT
+// invoked.
+func (s *Server) CreateVersion(ctx context.Context, req *gojirav1.CreateVersionRequest) (*gojirav1.CreateVersionResponse, error) {
+	name := req.GetName()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "name is required")
+	}
+	project := req.GetProject()
+	if project == "" {
+		return nil, status.Error(codes.InvalidArgument, "project is required")
+	}
+
+	opts := createVersionOpts(req)
+
+	if req.GetDryRun() {
+		body, err := gojira.BuildCreateVersionBody(name, project, opts...)
+		if err != nil {
+			return nil, toStatusError(err)
+		}
+		return &gojirav1.CreateVersionResponse{DryRunBody: body}, nil
+	}
+
+	v, err := s.createVersionFn(ctx, s.cfg, name, project, opts...)
+	if err != nil {
+		return nil, toStatusError(err)
+	}
+	return &gojirav1.CreateVersionResponse{Version: versionToProto(v)}, nil
+}
+
+// UpdateVersion edits an existing version identified by id. dry_run
+// mirrors CreateVersion: the seam is NOT invoked and the response carries
+// dry_run_body.
+func (s *Server) UpdateVersion(ctx context.Context, req *gojirav1.UpdateVersionRequest) (*gojirav1.UpdateVersionResponse, error) {
+	id := req.GetId()
+	if id == "" {
+		return nil, status.Error(codes.InvalidArgument, "id is required")
+	}
+
+	opts := updateVersionOpts(req)
+
+	if req.GetDryRun() {
+		body, err := gojira.BuildUpdateVersionBody(opts...)
+		if err != nil {
+			return nil, toStatusError(err)
+		}
+		return &gojirav1.UpdateVersionResponse{DryRunBody: body}, nil
+	}
+
+	v, err := s.updateVersionFn(ctx, s.cfg, id, opts...)
+	if err != nil {
+		return nil, toStatusError(err)
+	}
+	return &gojirav1.UpdateVersionResponse{Version: versionToProto(v)}, nil
+}
+
+// ListVersions lists the versions (releases) for a project (id or key).
+func (s *Server) ListVersions(ctx context.Context, req *gojirav1.ListVersionsRequest) (*gojirav1.ListVersionsResponse, error) {
+	project := req.GetProject()
+	if project == "" {
+		return nil, status.Error(codes.InvalidArgument, "project is required")
+	}
+
+	vs, err := s.listVersionsFn(ctx, s.cfg, project)
+	if err != nil {
+		return nil, toStatusError(err)
+	}
+	out := make([]*gojirav1.Version, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, versionToProto(v))
+	}
+	return &gojirav1.ListVersionsResponse{Versions: out}, nil
 }

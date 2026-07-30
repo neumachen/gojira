@@ -18,7 +18,10 @@
 //     (or in addition to) writing graph artifacts.
 //   - Write operations — [CreateIssue], [UpdateIssue], [AddComment],
 //     [ListTransitions], [TransitionIssue], and [TransitionIssueByStatus]
-//     mutate Jira; [BuildCreateIssueBody]/[BuildUpdateIssueBody] expose the
+//     mutate Jira; version (release) management is handled by
+//     [CreateVersion], [UpdateVersion], and [ListVersions];
+//     [BuildCreateIssueBody]/[BuildUpdateIssueBody] and
+//     [BuildCreateVersionBody]/[BuildUpdateVersionBody] expose the
 //     request-body builders for dry-run previews.
 //   - Event sinks — [Sink], [Event], [NoopSink], and [NewSlogSink] let
 //     callers observe crawl progress.
@@ -744,4 +747,71 @@ func BuildCreateIssueBody(project, issueType string, opts ...client.CreateOption
 // pure pass-through — no network, no client construction.
 func BuildUpdateIssueBody(opts ...client.UpdateOption) ([]byte, error) {
 	return client.RenderUpdateBody(opts...)
+}
+
+// ---------------------------------------------------------------------------
+// Version (release) management (facade)
+// ---------------------------------------------------------------------------
+
+// CreateVersion creates a new project version (release). name and project
+// are required and explicit — project may be a numeric project id
+// ("10000") used directly, or a project key ("EXAMPLE") which the client
+// resolves to a numeric id before sending. Optional fields flow through
+// the [client.VersionOption] set. On success the returned [client.Version]
+// carries Jira's created-version payload. On 400/409 the error is a
+// [*client.APIError] wrapping the matching sentinel.
+func CreateVersion(ctx context.Context, cfg Config, name, project string, opts ...client.VersionOption) (client.Version, error) {
+	c, err := client.New(cfg)
+	if err != nil {
+		return client.Version{}, errext.Errorf("gojira: build client: %w", err)
+	}
+	got, err := c.CreateVersion(ctx, name, project, opts...)
+	if err != nil {
+		return client.Version{}, errext.Errorf("gojira: create version: %w", err)
+	}
+	return got, nil
+}
+
+// UpdateVersion edits the version identified by its numeric id. Only the
+// optional fields supplied via [client.VersionOption] are sent (released/
+// archived flags, dates, description); name/project are not updatable.
+// The returned [client.Version] carries Jira's updated payload.
+func UpdateVersion(ctx context.Context, cfg Config, id string, opts ...client.VersionOption) (client.Version, error) {
+	c, err := client.New(cfg)
+	if err != nil {
+		return client.Version{}, errext.Errorf("gojira: build client: %w", err)
+	}
+	got, err := c.UpdateVersion(ctx, id, opts...)
+	if err != nil {
+		return client.Version{}, errext.Errorf("gojira: update version %s: %w", id, err)
+	}
+	return got, nil
+}
+
+// ListVersions returns all versions for the given project (id or key).
+func ListVersions(ctx context.Context, cfg Config, projectIDOrKey string) ([]client.Version, error) {
+	c, err := client.New(cfg)
+	if err != nil {
+		return nil, errext.Errorf("gojira: build client: %w", err)
+	}
+	got, err := c.ListVersions(ctx, projectIDOrKey)
+	if err != nil {
+		return nil, errext.Errorf("gojira: list versions for %s: %w", projectIDOrKey, err)
+	}
+	return got, nil
+}
+
+// BuildCreateVersionBody returns the JSON request body [CreateVersion]
+// would POST, without contacting Jira. It is a pure pass-through over
+// [client.RenderCreateVersionBody]: a numeric project emits an integer
+// projectId, a project key omits projectId (network-free dry-run).
+func BuildCreateVersionBody(name, project string, opts ...client.VersionOption) ([]byte, error) {
+	return client.RenderCreateVersionBody(name, project, opts...)
+}
+
+// BuildUpdateVersionBody returns the JSON request body [UpdateVersion]
+// would PUT, without contacting Jira. Pure pass-through over
+// [client.RenderUpdateVersionBody].
+func BuildUpdateVersionBody(opts ...client.VersionOption) ([]byte, error) {
+	return client.RenderUpdateVersionBody(opts...)
 }

@@ -351,6 +351,7 @@ Exit codes:
 			commentCommand(env),
 			transitionsCommand(env),
 			transitionCommand(env),
+			releaseCommand(env),
 			initCommand(env),
 			mcpCommand(env, signalled),
 		},

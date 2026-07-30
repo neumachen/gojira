@@ -37,23 +37,50 @@ type listTransitionsIn struct {
 }
 
 type createIssueIn struct {
-	Project     string         `json:"project" jsonschema:"target Jira project key"`
-	IssueType   string         `json:"issue_type" jsonschema:"Jira issue type name (e.g. Task, Story, Bug)"`
-	Summary     string         `json:"summary" jsonschema:"the new issue summary"`
-	Description string         `json:"description,omitempty" jsonschema:"plain-text description (server converts to ADF)"`
-	Assignee    string         `json:"assignee,omitempty" jsonschema:"assignee accountId"`
-	Labels      []string       `json:"labels,omitempty" jsonschema:"labels to apply"`
-	ParentKey   string         `json:"parent_key,omitempty" jsonschema:"parent issue key for hierarchy children"`
-	RawFields   map[string]any `json:"raw_fields,omitempty" jsonschema:"additional Jira fields by id (e.g. customfield_*)"`
+	Project       string         `json:"project" jsonschema:"target Jira project key"`
+	IssueType     string         `json:"issue_type" jsonschema:"Jira issue type name (e.g. Task, Story, Bug)"`
+	Summary       string         `json:"summary" jsonschema:"the new issue summary"`
+	Description   string         `json:"description,omitempty" jsonschema:"plain-text description (server converts to ADF)"`
+	Assignee      string         `json:"assignee,omitempty" jsonschema:"assignee accountId"`
+	Labels        []string       `json:"labels,omitempty" jsonschema:"labels to apply"`
+	ParentKey     string         `json:"parent_key,omitempty" jsonschema:"parent issue key for hierarchy children"`
+	FixVersions   []string       `json:"fix_versions,omitempty" jsonschema:"fix versions by name"`
+	FixVersionIDs []string       `json:"fix_version_ids,omitempty" jsonschema:"fix versions by id"`
+	RawFields     map[string]any `json:"raw_fields,omitempty" jsonschema:"additional Jira fields by id (e.g. customfield_*)"`
 }
 
 type updateIssueIn struct {
-	Key         string         `json:"key" jsonschema:"the issue key to update"`
-	Summary     string         `json:"summary,omitempty"`
-	Description string         `json:"description,omitempty"`
-	Assignee    string         `json:"assignee,omitempty"`
-	Labels      []string       `json:"labels,omitempty"`
-	RawFields   map[string]any `json:"raw_fields,omitempty"`
+	Key           string         `json:"key" jsonschema:"the issue key to update"`
+	Summary       string         `json:"summary,omitempty"`
+	Description   string         `json:"description,omitempty"`
+	Assignee      string         `json:"assignee,omitempty"`
+	Labels        []string       `json:"labels,omitempty"`
+	FixVersions   []string       `json:"fix_versions,omitempty" jsonschema:"replacement fix versions by name (set-replace)"`
+	FixVersionIDs []string       `json:"fix_version_ids,omitempty" jsonschema:"replacement fix versions by id (set-replace)"`
+	RawFields     map[string]any `json:"raw_fields,omitempty"`
+}
+
+type listVersionsIn struct {
+	Project string `json:"project" jsonschema:"the Jira project key or id whose versions to list"`
+}
+
+type createVersionIn struct {
+	Project     string `json:"project" jsonschema:"target Jira project key or numeric id"`
+	Name        string `json:"name" jsonschema:"the new version name"`
+	Description string `json:"description,omitempty"`
+	Released    *bool  `json:"released,omitempty" jsonschema:"whether the version is released"`
+	Archived    *bool  `json:"archived,omitempty" jsonschema:"whether the version is archived"`
+	ReleaseDate string `json:"release_date,omitempty" jsonschema:"release date (yyyy-mm-dd)"`
+	StartDate   string `json:"start_date,omitempty" jsonschema:"start date (yyyy-mm-dd)"`
+}
+
+type updateVersionIn struct {
+	ID          string `json:"id" jsonschema:"the numeric version id to update"`
+	Description string `json:"description,omitempty"`
+	Released    *bool  `json:"released,omitempty"`
+	Archived    *bool  `json:"archived,omitempty"`
+	ReleaseDate string `json:"release_date,omitempty" jsonschema:"release date (yyyy-mm-dd)"`
+	StartDate   string `json:"start_date,omitempty" jsonschema:"start date (yyyy-mm-dd)"`
 }
 
 type addCommentIn struct {
@@ -146,6 +173,19 @@ func registerTools(server *mcpsdk.Server, b mcpBackend, allowWrites bool) {
 			return jsonResult(map[string]any{"transitions": ts}), nil, nil
 		})
 
+	mcpsdk.AddTool(server,
+		&mcpsdk.Tool{
+			Name:        "list_versions",
+			Description: "List the versions (releases) for a Jira project (id or key).",
+		},
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in listVersionsIn) (*mcpsdk.CallToolResult, any, error) {
+			vs, err := b.ListVersions(ctx, in.Project)
+			if err != nil {
+				return errorResult(err), nil, nil
+			}
+			return jsonResult(map[string]any{"versions": vs}), nil, nil
+		})
+
 	if !allowWrites {
 		return
 	}
@@ -157,12 +197,14 @@ func registerTools(server *mcpsdk.Server, b mcpBackend, allowWrites bool) {
 		},
 		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in createIssueIn) (*mcpsdk.CallToolResult, any, error) {
 			res, err := b.CreateIssue(ctx, in.Project, in.IssueType, CreateIssueFields{
-				Summary:     in.Summary,
-				Description: in.Description,
-				Assignee:    in.Assignee,
-				Labels:      in.Labels,
-				ParentKey:   in.ParentKey,
-				RawFields:   in.RawFields,
+				Summary:       in.Summary,
+				Description:   in.Description,
+				Assignee:      in.Assignee,
+				Labels:        in.Labels,
+				ParentKey:     in.ParentKey,
+				FixVersions:   in.FixVersions,
+				FixVersionIDs: in.FixVersionIDs,
+				RawFields:     in.RawFields,
 			})
 			if err != nil {
 				return errorResult(err), nil, nil
@@ -177,11 +219,13 @@ func registerTools(server *mcpsdk.Server, b mcpBackend, allowWrites bool) {
 		},
 		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in updateIssueIn) (*mcpsdk.CallToolResult, any, error) {
 			err := b.UpdateIssue(ctx, in.Key, UpdateIssueFields{
-				Summary:     in.Summary,
-				Description: in.Description,
-				Assignee:    in.Assignee,
-				Labels:      in.Labels,
-				RawFields:   in.RawFields,
+				Summary:       in.Summary,
+				Description:   in.Description,
+				Assignee:      in.Assignee,
+				Labels:        in.Labels,
+				FixVersions:   in.FixVersions,
+				FixVersionIDs: in.FixVersionIDs,
+				RawFields:     in.RawFields,
 			})
 			if err != nil {
 				return errorResult(err), nil, nil
@@ -215,6 +259,44 @@ func registerTools(server *mcpsdk.Server, b mcpBackend, allowWrites bool) {
 				return errorResult(err), nil, nil
 			}
 			return jsonResult(map[string]any{"ok": true, "key": in.Key}), nil, nil
+		})
+
+	mcpsdk.AddTool(server,
+		&mcpsdk.Tool{
+			Name:        "create_version",
+			Description: "Create a new Jira project version (release).",
+		},
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in createVersionIn) (*mcpsdk.CallToolResult, any, error) {
+			v, err := b.CreateVersion(ctx, in.Name, in.Project, VersionFields{
+				Description: in.Description,
+				Released:    in.Released,
+				Archived:    in.Archived,
+				ReleaseDate: in.ReleaseDate,
+				StartDate:   in.StartDate,
+			})
+			if err != nil {
+				return errorResult(err), nil, nil
+			}
+			return jsonResult(v), nil, nil
+		})
+
+	mcpsdk.AddTool(server,
+		&mcpsdk.Tool{
+			Name:        "update_version",
+			Description: "Edit an existing Jira project version (release).",
+		},
+		func(ctx context.Context, _ *mcpsdk.CallToolRequest, in updateVersionIn) (*mcpsdk.CallToolResult, any, error) {
+			v, err := b.UpdateVersion(ctx, in.ID, VersionFields{
+				Description: in.Description,
+				Released:    in.Released,
+				Archived:    in.Archived,
+				ReleaseDate: in.ReleaseDate,
+				StartDate:   in.StartDate,
+			})
+			if err != nil {
+				return errorResult(err), nil, nil
+			}
+			return jsonResult(v), nil, nil
 		})
 }
 

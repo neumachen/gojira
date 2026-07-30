@@ -4,6 +4,40 @@ All notable changes to gojira are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Jira version/release management across every surface. Create, update,
+  and list a Jira project Version (a "Release" on the project's Releases
+  page); versions are project-scoped, not tied to an issue.
+  - CLI: a new `gojira release` command group — `release create`,
+    `release update`, and `release list`, with `--dry-run` body previews
+    for `create`/`update`.
+  - MCP: `list_versions` (read-only, always available) plus
+    `create_version` and `update_version` (mutating, gated behind
+    `mcp.allow_writes`).
+  - gRPC: `CreateVersion`, `UpdateVersion`, and `ListVersions` RPCs on
+    `gojira.v1.Gojira` (`CreateVersion`/`UpdateVersion` support a dry-run
+    body preview).
+  - Library facade: `CreateVersion`, `UpdateVersion`, `ListVersions`, and
+    the pure `BuildCreateVersionBody` / `BuildUpdateVersionBody` builders.
+- `fixVersions` support on issue create/update — attach one or more Fix
+  Version(s) to an issue.
+  - CLI: `--fix-version <name>` and `--fix-version-id <id>` (repeatable)
+    on both `gojira create` and `gojira update`; on `update` the plain
+    flags set-replace, and `--add-fix-version <id>` /
+    `--remove-fix-version <id>` add or remove incrementally.
+  - MCP/gRPC: `fix_versions` (names) and `fix_version_ids` (ids) inputs on
+    `create_issue`/`update_issue` and
+    `CreateIssueRequest`/`UpdateIssueRequest`.
+  - Library options: `client.WithFixVersionIDs`/`WithFixVersionNames`
+    (create), `client.WithFixVersionIDsUpdate`/`WithFixVersionNamesUpdate`
+    (set-replace), and `client.WithFixVersionAdd`/`WithFixVersionRemove`
+    (incremental).
+- Version **deletion is intentionally unsupported**, consistent with
+  gojira's no-delete stance on issues.
+
 ## [v0.5.0] — 2026-07-02
 
 ### Added

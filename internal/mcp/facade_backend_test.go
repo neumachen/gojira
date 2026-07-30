@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,7 +18,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	gojira "github.com/neumachen/gojira"
+	"github.com/neumachen/gojira/pkg/client"
 )
+
+// boolPtr is a package-local helper for building *bool VersionFields
+// values in tests. Shared across the mcp package's test files.
+func boolPtr(b bool) *bool { return &b }
 
 // minimalIssueJSON renders the same minimal Jira issue shape the
 // other facade tests use, including the self URL and a fields
@@ -241,4 +247,154 @@ func TestFacadeBackend_TransitionIssue_BothOrNeitherErrors(t *testing.T) {
 	assert.Error(t, err, "neither id nor toStatus must error")
 	err = b.TransitionIssue(context.Background(), "PROJ-1", "11", "Done", TransitionFields{})
 	assert.Error(t, err, "both id and toStatus must error")
+}
+
+// ---------------------------------------------------------------------------
+// version management + fixVersions forwarding through facadeBackend
+// ---------------------------------------------------------------------------
+
+// versionFake serves the version + project endpoints the facade backend
+// exercises, capturing the create/update request bodies.
+type versionFake struct {
+	*httptest.Server
+	createBody []byte
+	updateBody []byte
+}
+
+func newVersionFake(t *testing.T) *versionFake {
+	t.Helper()
+	vf := &versionFake{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/rest/api/3/version", func(w http.ResponseWriter, r *http.Request) {
+		vf.createBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"20000","name":"Release-abc1234","projectId":10000,"released":true}`)
+	})
+	mux.HandleFunc("/rest/api/3/version/20000", func(w http.ResponseWriter, r *http.Request) {
+		vf.updateBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"id":"20000","name":"Release-abc1234","released":false}`)
+	})
+	mux.HandleFunc("/rest/api/3/project/EXAMPLE/version", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"values":[{"id":"20000","name":"1.0","projectId":10000,"released":true}],"startAt":0,"maxResults":50,"total":1,"isLast":true}`)
+	})
+	vf.Server = httptest.NewServer(mux)
+	t.Cleanup(vf.Server.Close)
+	return vf
+}
+
+func TestFacadeBackend_CreateVersion(t *testing.T) {
+	vf := newVersionFake(t)
+	b := NewFacadeBackend(testFacadeCfg(t, vf.URL))
+
+	v, err := b.CreateVersion(context.Background(), "Release-abc1234", "10000",
+		VersionFields{Released: boolPtr(true)})
+	require.NoError(t, err)
+	assert.Equal(t, "20000", v.ID)
+	assert.Equal(t, 10000, v.ProjectID)
+
+	body := decodeVersionBody(t, vf.createBody)
+	assert.Equal(t, true, body["released"])
+	assert.Equal(t, float64(10000), body["projectId"], "numeric project must emit projectId number")
+	_, hasArchived := body["archived"]
+	assert.False(t, hasArchived, "unset archived must not be emitted")
+}
+
+func TestFacadeBackend_UpdateVersion_BoolPresence(t *testing.T) {
+	vf := newVersionFake(t)
+	b := NewFacadeBackend(testFacadeCfg(t, vf.URL))
+
+	// Only the description is set: released/archived (nil) must be absent.
+	_, err := b.UpdateVersion(context.Background(), "20000",
+		VersionFields{Description: "just the description"})
+	require.NoError(t, err)
+	body := decodeVersionBody(t, vf.updateBody)
+	assert.Equal(t, "just the description", body["description"])
+	_, hasReleased := body["released"]
+	_, hasArchived := body["archived"]
+	assert.False(t, hasReleased, "nil Released must not be applied on update")
+	assert.False(t, hasArchived, "nil Archived must not be applied on update")
+
+	// Explicit archived=false must be emitted (presence via *bool).
+	_, err = b.UpdateVersion(context.Background(), "20000",
+		VersionFields{Archived: boolPtr(false)})
+	require.NoError(t, err)
+	body = decodeVersionBody(t, vf.updateBody)
+	got, ok := body["archived"]
+	assert.True(t, ok, "explicit Archived=false must be applied")
+	assert.Equal(t, false, got)
+}
+
+func TestFacadeBackend_ListVersions(t *testing.T) {
+	vf := newVersionFake(t)
+	b := NewFacadeBackend(testFacadeCfg(t, vf.URL))
+
+	vs, err := b.ListVersions(context.Background(), "EXAMPLE")
+	require.NoError(t, err)
+	require.Len(t, vs, 1)
+	assert.Equal(t, "20000", vs[0].ID)
+	assert.True(t, vs[0].Released)
+}
+
+// TestVersionOptsFromFields_BoolPresence unit-tests the *bool mapping in
+// isolation: nil bools are omitted, non-nil bools (including explicit
+// false) are emitted.
+func TestVersionOptsFromFields_BoolPresence(t *testing.T) {
+	t.Parallel()
+
+	body, err := client.RenderUpdateVersionBody(
+		versionOptsFromFields(VersionFields{Description: "d"})...)
+	require.NoError(t, err)
+	m := decodeVersionBody(t, body)
+	_, hasR := m["released"]
+	_, hasA := m["archived"]
+	assert.False(t, hasR)
+	assert.False(t, hasA)
+	assert.Equal(t, "d", m["description"])
+
+	body2, err := client.RenderUpdateVersionBody(
+		versionOptsFromFields(VersionFields{Released: boolPtr(true), Archived: boolPtr(false)})...)
+	require.NoError(t, err)
+	m2 := decodeVersionBody(t, body2)
+	assert.Equal(t, true, m2["released"])
+	assert.Equal(t, false, m2["archived"])
+}
+
+// TestFacadeBackend_CreateIssue_FixVersionsForwarded confirms the MCP
+// primitive CreateIssueFields fix-version slices are forwarded into the
+// client options (id form applied after name form → id wins on the single
+// fixVersions key).
+func TestFacadeBackend_CreateIssue_FixVersionsForwarded(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"1","key":"NEW-1","self":"x"}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	b := NewFacadeBackend(testFacadeCfg(t, srv.URL))
+	_, err := b.CreateIssue(context.Background(), "PROJ", "Task", CreateIssueFields{
+		Summary:       "s",
+		FixVersions:   []string{"1.0"},
+		FixVersionIDs: []string{"10000"},
+	})
+	require.NoError(t, err)
+
+	m := decodeVersionBody(t, body)
+	fields, ok := m["fields"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, []any{map[string]any{"id": "10000"}}, fields["fixVersions"])
+}
+
+func decodeVersionBody(t *testing.T, raw []byte) map[string]any {
+	t.Helper()
+	var m map[string]any
+	require.NoErrorf(t, json.Unmarshal(raw, &m), "decode body: %s", string(raw))
+	return m
 }

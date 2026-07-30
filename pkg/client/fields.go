@@ -133,6 +133,30 @@ func opParent(key string) fieldOp {
 	}
 }
 
+func opFixVersionsByID(ids ...string) fieldOp {
+	// Copy to decouple from the caller's slice (cheap, defensive) —
+	// mirrors opLabels.
+	cp := append([]string(nil), ids...)
+	return func(b *fieldsBuilder) {
+		arr := make([]any, 0, len(cp))
+		for _, id := range cp {
+			arr = append(arr, map[string]any{"id": id})
+		}
+		b.setField("fixVersions", arr)
+	}
+}
+
+func opFixVersionsByName(names ...string) fieldOp {
+	cp := append([]string(nil), names...)
+	return func(b *fieldsBuilder) {
+		arr := make([]any, 0, len(cp))
+		for _, n := range cp {
+			arr = append(arr, map[string]any{"name": n})
+		}
+		b.setField("fixVersions", arr)
+	}
+}
+
 func opField(fieldID string, value any) fieldOp {
 	return func(b *fieldsBuilder) { b.setField(fieldID, value) }
 }
@@ -174,6 +198,18 @@ func WithLabels(labels ...string) CreateOption { return CreateOption(opLabels(la
 // Sub-task's parent). Update has its own "parent" semantics that differ
 // per workflow; we therefore expose WithParent only on Create.
 func WithParent(key string) CreateOption { return CreateOption(opParent(key)) }
+
+// WithFixVersionIDs sets the fixVersions array on a Create request by
+// version id, e.g. fixVersions: [{"id":"10000"}, ...].
+func WithFixVersionIDs(ids ...string) CreateOption {
+	return CreateOption(opFixVersionsByID(ids...))
+}
+
+// WithFixVersionNames sets the fixVersions array on a Create request by
+// version name, e.g. fixVersions: [{"name":"1.0"}, ...].
+func WithFixVersionNames(names ...string) CreateOption {
+	return CreateOption(opFixVersionsByName(names...))
+}
 
 // WithField is the generic escape hatch: set fields[fieldID]=value with
 // no typed wrapper. Use this for any custom field or for fields the
@@ -230,6 +266,37 @@ func WithFieldUpdate(fieldID string, value any) UpdateOption {
 // object on an Update request.
 func WithRawFieldsUpdate(m map[string]any) UpdateOption {
 	return UpdateOption(opRawFields(m))
+}
+
+// WithFixVersionIDsUpdate sets (set-replace) the fixVersions array on an
+// Update request by version id. Use [WithFixVersionAdd] /
+// [WithFixVersionRemove] for incremental edits.
+func WithFixVersionIDsUpdate(ids ...string) UpdateOption {
+	return UpdateOption(opFixVersionsByID(ids...))
+}
+
+// WithFixVersionNamesUpdate sets (set-replace) the fixVersions array on an
+// Update request by version name.
+func WithFixVersionNamesUpdate(names ...string) UpdateOption {
+	return UpdateOption(opFixVersionsByName(names...))
+}
+
+// WithFixVersionAdd appends an incremental "add" op for fixVersions,
+// adding the version with the given id without disturbing the issue's
+// other fix versions. Update-only, since update verbs only have a defined
+// meaning on existing issues.
+func WithFixVersionAdd(id string) UpdateOption {
+	return func(b *fieldsBuilder) {
+		b.addUpdate("fixVersions", "add", map[string]any{"id": id})
+	}
+}
+
+// WithFixVersionRemove appends an incremental "remove" op for fixVersions,
+// removing the version with the given id. Update-only.
+func WithFixVersionRemove(id string) UpdateOption {
+	return func(b *fieldsBuilder) {
+		b.addUpdate("fixVersions", "remove", map[string]any{"id": id})
+	}
 }
 
 // WithUpdateVerb appends an update op (verb is "add", "remove", or

@@ -53,6 +53,18 @@ service Gojira {
   // either by transition_id or by target_status_name (resolved server-side
   // via ListTransitions).
   rpc TransitionIssue(TransitionIssueRequest) returns (TransitionIssueResponse);
+
+  // CreateVersion creates a new project version (release). When dry_run is
+  // set the server returns the request body it WOULD send (in dry_run_body)
+  // without contacting Jira.
+  rpc CreateVersion(CreateVersionRequest) returns (CreateVersionResponse);
+
+  // UpdateVersion edits an existing project version. Honors dry_run like
+  // CreateVersion.
+  rpc UpdateVersion(UpdateVersionRequest) returns (UpdateVersionResponse);
+
+  // ListVersions lists the versions (releases) for a project (id or key).
+  rpc ListVersions(ListVersionsRequest) returns (ListVersionsResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -545,6 +557,10 @@ message CreateIssueRequest {
   // dry_run, when true, makes the server return the request body it would send
   // (in CreateIssueResponse.dry_run_body) without creating an issue.
   bool dry_run = 8;
+  // fix_versions sets the issue fixVersions by version name (set-replace).
+  repeated string fix_versions = 9;
+  // fix_version_ids sets the issue fixVersions by version id (set-replace).
+  repeated string fix_version_ids = 10;
 }
 
 message CreateIssueResponse {
@@ -563,6 +579,10 @@ message UpdateIssueRequest {
   string description = 3;
   map<string, string> raw_fields = 4;
   bool dry_run = 5;
+  // fix_versions replaces the issue fixVersions by version name (set-replace).
+  repeated string fix_versions = 6;
+  // fix_version_ids replaces the issue fixVersions by version id (set-replace).
+  repeated string fix_version_ids = 7;
 }
 
 message UpdateIssueResponse {
@@ -612,6 +632,79 @@ message TransitionIssueRequest {
 
 message TransitionIssueResponse {
   bool ok = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Version (release) management
+// ---------------------------------------------------------------------------
+
+// Version mirrors client.Version — a Jira project version (release).
+// project_id is the numeric project id the version belongs to.
+message Version {
+  string id = 1;
+  string name = 2;
+  int64 project_id = 3;
+  string description = 4;
+  bool released = 5;
+  bool archived = 6;
+  string release_date = 7;
+  string start_date = 8;
+  string self = 9;
+}
+
+// CreateVersionRequest creates a new project version. name and project are
+// required; project may be a numeric project id ("10000") or a project key
+// ("EXAMPLE"), resolved server-side. Optional fields carry the version's
+// release metadata. When dry_run is set the server returns the body it
+// would POST in CreateVersionResponse.dry_run_body without contacting Jira.
+message CreateVersionRequest {
+  string name = 1;
+  string project = 2;
+  string description = 3;
+  bool released = 4;
+  bool archived = 5;
+  string release_date = 6;
+  string start_date = 7;
+  bool dry_run = 8;
+}
+
+message CreateVersionResponse {
+  Version version = 1;
+  // dry_run_body is the JSON body the server would have POSTed; set only
+  // when the request had dry_run = true (version is then unset).
+  bytes dry_run_body = 2;
+}
+
+// UpdateVersionRequest edits an existing version identified by id.
+// released/archived are `optional` so proto3 field presence distinguishes
+// "unset" from false: an omitted value leaves the existing Jira value
+// unchanged, while an explicit false clears it. Honors dry_run like create.
+message UpdateVersionRequest {
+  string id = 1;
+  string description = 2;
+  // released, when present, sets the version's released flag; when omitted
+  // the existing Jira value is left unchanged (field presence via optional).
+  optional bool released = 3;
+  // archived, when present, sets the version's archived flag; when omitted
+  // the existing Jira value is left unchanged (field presence via optional).
+  optional bool archived = 4;
+  string release_date = 5;
+  string start_date = 6;
+  bool dry_run = 7;
+}
+
+message UpdateVersionResponse {
+  Version version = 1;
+  bytes dry_run_body = 2;
+}
+
+// ListVersionsRequest lists the versions for a project (id or key).
+message ListVersionsRequest {
+  string project = 1;
+}
+
+message ListVersionsResponse {
+  repeated Version versions = 1;
 }
 
 // ---------------------------------------------------------------------------

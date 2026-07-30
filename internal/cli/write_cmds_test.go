@@ -497,13 +497,299 @@ func TestRun_Transition_ByStatus_NoMatch(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// fix-version flags (Gap B)
+// ---------------------------------------------------------------------------
+
+func TestRun_Create_FixVersions_DryRun(t *testing.T) {
+	srv := newWriteServer(t)
+	env := writeBaseEnv(t, srv.URL)
+
+	stdout, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "create",
+			"--project", "PROJ",
+			"--summary", "S",
+			"--fix-version", "1.0",
+			"--fix-version-id", "10000",
+			"--dry-run",
+		}, env)
+	assert.Equal(t, 0, code, "stderr=%q", stderr)
+	assert.Empty(t, srv.records(), "dry-run must not contact the server")
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(stdout)), &parsed))
+	fields, ok := parsed["fields"].(map[string]any)
+	require.True(t, ok)
+	// The id form is applied after the name form, so the last write wins
+	// on the single fixVersions key.
+	fv, ok := fields["fixVersions"].([]any)
+	require.True(t, ok, "fixVersions must be present, got %T", fields["fixVersions"])
+	assert.Equal(t, []any{map[string]any{"id": "10000"}}, fv)
+}
+
+func TestRun_Update_FixVersions_AddRemove_DryRun(t *testing.T) {
+	srv := newWriteServer(t)
+	env := writeBaseEnv(t, srv.URL)
+
+	stdout, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "update", "PROJ-1",
+			"--add-fix-version", "10000",
+			"--remove-fix-version", "10001",
+			"--dry-run",
+		}, env)
+	assert.Equal(t, 0, code, "stderr=%q", stderr)
+	assert.Empty(t, srv.records(), "dry-run must not contact the server")
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(stdout)), &parsed))
+	update, ok := parsed["update"].(map[string]any)
+	require.True(t, ok, "update object must be present")
+	ops, ok := update["fixVersions"].([]any)
+	require.True(t, ok)
+	require.Len(t, ops, 2)
+	assert.Equal(t, map[string]any{"add": map[string]any{"id": "10000"}}, ops[0])
+	assert.Equal(t, map[string]any{"remove": map[string]any{"id": "10001"}}, ops[1])
+}
+
+func TestRun_Update_FixVersions_UnsetNotEmitted(t *testing.T) {
+	srv := newWriteServer(t)
+	env := writeBaseEnv(t, srv.URL)
+
+	stdout, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "update", "PROJ-1",
+			"--summary", "only summary",
+			"--dry-run",
+		}, env)
+	assert.Equal(t, 0, code, "stderr=%q", stderr)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(stdout)), &parsed))
+	fields, ok := parsed["fields"].(map[string]any)
+	require.True(t, ok)
+	_, hasFields := fields["fixVersions"]
+	assert.False(t, hasFields, "unset fix-version flags must not emit fixVersions in fields")
+	if update, ok := parsed["update"].(map[string]any); ok {
+		_, hasUpdate := update["fixVersions"]
+		assert.False(t, hasUpdate, "unset fix-version flags must not emit fixVersions in update")
+	}
+}
+
+func TestRun_Update_FixVersionSetReplace_DryRun(t *testing.T) {
+	srv := newWriteServer(t)
+	env := writeBaseEnv(t, srv.URL)
+
+	stdout, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "update", "PROJ-1",
+			"--fix-version-id", "10000",
+			"--dry-run",
+		}, env)
+	assert.Equal(t, 0, code, "stderr=%q", stderr)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(stdout)), &parsed))
+	fields, ok := parsed["fields"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, []any{map[string]any{"id": "10000"}}, fields["fixVersions"])
+}
+
+// ---------------------------------------------------------------------------
+// release (version management)
+// ---------------------------------------------------------------------------
+
+// newVersionServer returns an httptest.Server that fakes the Jira version
+// endpoints, recording every request it receives.
+func newVersionServer(t *testing.T) (*httptest.Server, *[]recordedRequest) {
+	t.Helper()
+	var (
+		mu   sync.Mutex
+		recs []recordedRequest
+	)
+	record := func(r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		rec := recordedRequest{method: r.Method, path: r.URL.Path, raw: body}
+		if len(body) > 0 {
+			var decoded any
+			if err := json.Unmarshal(body, &decoded); err == nil {
+				rec.body = decoded
+			}
+		}
+		mu.Lock()
+		recs = append(recs, rec)
+		mu.Unlock()
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/rest/api/3/version", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"20000","name":"Release-abc1234","projectId":10000,"released":true,"releaseDate":"2000-01-01","self":"` + r.Host + `/rest/api/3/version/20000"}`))
+	})
+	mux.HandleFunc("/rest/api/3/project/EXAMPLE/version", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"values":[{"id":"20000","name":"Release-abc1234","projectId":10000,"released":true,"releaseDate":"2000-01-01"}],"startAt":0,"maxResults":50,"total":1,"isLast":true}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv, &recs
+}
+
+func TestRun_Release_Create_DryRun_NumericID_ExactBody(t *testing.T) {
+	srv := newWriteServer(t)
+	env := writeBaseEnv(t, srv.URL)
+
+	stdout, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "release", "create",
+			"--project-id", "10000",
+			"--name", "Release-abc1234",
+			"--released",
+			"--release-date", "2000-01-01",
+			"--dry-run",
+		}, env)
+	assert.Equal(t, 0, code, "stderr=%q", stderr)
+	assert.Empty(t, srv.records(), "dry-run must not contact the server")
+	assert.NotContains(t, stderr, "note:", "numeric --project-id must not emit the resolve note")
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(stdout)), &parsed))
+	assert.Equal(t, "Release-abc1234", parsed["name"])
+	assert.Equal(t, float64(10000), parsed["projectId"], "numeric id must emit projectId number")
+	assert.Equal(t, true, parsed["released"])
+	assert.Equal(t, "2000-01-01", parsed["releaseDate"])
+}
+
+func TestRun_Release_Create_DryRun_Key_OmitsProjectID_WithNote(t *testing.T) {
+	srv := newWriteServer(t)
+	env := writeBaseEnv(t, srv.URL)
+
+	stdout, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "release", "create",
+			"--project", "EXAMPLE",
+			"--name", "Release-abc1234",
+			"--dry-run",
+		}, env)
+	assert.Equal(t, 0, code, "stderr=%q", stderr)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(stdout)), &parsed))
+	_, has := parsed["projectId"]
+	assert.False(t, has, "a project key must omit projectId in the dry-run body")
+	assert.Contains(t, stderr, "--project-id for a byte-exact dry-run",
+		"key-only dry-run must print the resolve note to stderr")
+}
+
+func TestRun_Release_Create_Success(t *testing.T) {
+	srv, _ := newVersionServer(t)
+	env := writeBaseEnv(t, srv.URL)
+
+	stdout, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "release", "create",
+			"--project-id", "10000",
+			"--name", "Release-abc1234",
+			"--released",
+			"--release-date", "2000-01-01",
+		}, env)
+	assert.Equal(t, 0, code, "stderr=%q", stderr)
+	assert.Contains(t, stdout, "Created version 20000 (Release-abc1234)")
+}
+
+func TestRun_Release_Create_MissingName(t *testing.T) {
+	srv := newWriteServer(t)
+	env := writeBaseEnv(t, srv.URL)
+
+	_, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "release", "create", "--project-id", "10000"}, env)
+	assert.Equal(t, 1, code)
+	assert.Contains(t, strings.ToLower(stderr), "name")
+	assert.Empty(t, srv.records(), "a validation failure must not contact the server")
+}
+
+func TestRun_Release_Create_MissingProject(t *testing.T) {
+	srv := newWriteServer(t)
+	env := writeBaseEnv(t, srv.URL)
+
+	_, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "release", "create", "--name", "Release-abc1234"}, env)
+	assert.Equal(t, 1, code)
+	assert.Contains(t, strings.ToLower(stderr), "project")
+	assert.Empty(t, srv.records(), "a validation failure must not contact the server")
+}
+
+func TestRun_Release_List_Empty(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/rest/api/3/project/EMPTY/version", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"values":[],"startAt":0,"maxResults":50,"total":0,"isLast":true}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	env := writeBaseEnv(t, srv.URL)
+
+	stdout, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "release", "list", "--project", "EMPTY"}, env)
+	assert.Equal(t, 0, code, "stderr=%q", stderr)
+	assert.Contains(t, stdout, "No versions for EMPTY")
+}
+
+func TestRun_Release_Update_MissingID(t *testing.T) {
+	srv := newWriteServer(t)
+	env := writeBaseEnv(t, srv.URL)
+
+	_, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "release", "update", "--released"}, env)
+	assert.Equal(t, 1, code)
+	assert.Contains(t, strings.ToLower(stderr), "version-id")
+}
+
+func TestRun_Release_Update_DryRun(t *testing.T) {
+	srv := newWriteServer(t)
+	env := writeBaseEnv(t, srv.URL)
+
+	stdout, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "release", "update", "20000",
+			"--released",
+			"--dry-run",
+		}, env)
+	assert.Equal(t, 0, code, "stderr=%q", stderr)
+	assert.Empty(t, srv.records(), "dry-run must not contact the server")
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(strings.TrimSpace(stdout)), &parsed))
+	assert.Equal(t, true, parsed["released"])
+}
+
+func TestRun_Release_Update_NothingToUpdate(t *testing.T) {
+	srv := newWriteServer(t)
+	env := writeBaseEnv(t, srv.URL)
+
+	_, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "release", "update", "20000"}, env)
+	assert.Equal(t, 1, code)
+	assert.Contains(t, strings.ToLower(stderr), "nothing to update")
+}
+
+func TestRun_Release_List(t *testing.T) {
+	srv, _ := newVersionServer(t)
+	env := writeBaseEnv(t, srv.URL)
+
+	stdout, stderr, code := captureRun(context.Background(),
+		[]string{"gojira", "release", "list", "--project", "EXAMPLE"}, env)
+	assert.Equal(t, 0, code, "stderr=%q", stderr)
+	assert.Contains(t, stdout, "20000")
+	assert.Contains(t, stdout, "Release-abc1234")
+	assert.Contains(t, stdout, "released=true")
+	assert.Contains(t, stdout, "2000-01-01")
+}
+
+// ---------------------------------------------------------------------------
 // --help wires the new commands
 // ---------------------------------------------------------------------------
 
 func TestRun_Help_ListsWriteCommands(t *testing.T) {
 	stdout, _, code := captureRun(context.Background(), []string{"gojira", "--help"}, nil)
 	assert.Equal(t, 0, code)
-	for _, sub := range []string{"create", "update", "comment", "transitions", "transition"} {
+	for _, sub := range []string{"create", "update", "comment", "transitions", "transition", "release"} {
 		assert.Contains(t, stdout, sub, "--help should list %q", sub)
 	}
 }

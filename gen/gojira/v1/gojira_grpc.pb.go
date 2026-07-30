@@ -28,6 +28,9 @@ const (
 	Gojira_AddComment_FullMethodName      = "/gojira.v1.Gojira/AddComment"
 	Gojira_ListTransitions_FullMethodName = "/gojira.v1.Gojira/ListTransitions"
 	Gojira_TransitionIssue_FullMethodName = "/gojira.v1.Gojira/TransitionIssue"
+	Gojira_CreateVersion_FullMethodName   = "/gojira.v1.Gojira/CreateVersion"
+	Gojira_UpdateVersion_FullMethodName   = "/gojira.v1.Gojira/UpdateVersion"
+	Gojira_ListVersions_FullMethodName    = "/gojira.v1.Gojira/ListVersions"
 )
 
 // GojiraClient is the client API for Gojira service.
@@ -73,6 +76,15 @@ type GojiraClient interface {
 	// either by transition_id or by target_status_name (resolved server-side
 	// via ListTransitions).
 	TransitionIssue(ctx context.Context, in *TransitionIssueRequest, opts ...grpc.CallOption) (*TransitionIssueResponse, error)
+	// CreateVersion creates a new project version (release). When dry_run is
+	// set the server returns the request body it WOULD send (in dry_run_body)
+	// without contacting Jira.
+	CreateVersion(ctx context.Context, in *CreateVersionRequest, opts ...grpc.CallOption) (*CreateVersionResponse, error)
+	// UpdateVersion edits an existing project version. Honors dry_run like
+	// CreateVersion.
+	UpdateVersion(ctx context.Context, in *UpdateVersionRequest, opts ...grpc.CallOption) (*UpdateVersionResponse, error)
+	// ListVersions lists the versions (releases) for a project (id or key).
+	ListVersions(ctx context.Context, in *ListVersionsRequest, opts ...grpc.CallOption) (*ListVersionsResponse, error)
 }
 
 type gojiraClient struct {
@@ -182,6 +194,36 @@ func (c *gojiraClient) TransitionIssue(ctx context.Context, in *TransitionIssueR
 	return out, nil
 }
 
+func (c *gojiraClient) CreateVersion(ctx context.Context, in *CreateVersionRequest, opts ...grpc.CallOption) (*CreateVersionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateVersionResponse)
+	err := c.cc.Invoke(ctx, Gojira_CreateVersion_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gojiraClient) UpdateVersion(ctx context.Context, in *UpdateVersionRequest, opts ...grpc.CallOption) (*UpdateVersionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateVersionResponse)
+	err := c.cc.Invoke(ctx, Gojira_UpdateVersion_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gojiraClient) ListVersions(ctx context.Context, in *ListVersionsRequest, opts ...grpc.CallOption) (*ListVersionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListVersionsResponse)
+	err := c.cc.Invoke(ctx, Gojira_ListVersions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GojiraServer is the server API for Gojira service.
 // All implementations must embed UnimplementedGojiraServer
 // for forward compatibility.
@@ -225,6 +267,15 @@ type GojiraServer interface {
 	// either by transition_id or by target_status_name (resolved server-side
 	// via ListTransitions).
 	TransitionIssue(context.Context, *TransitionIssueRequest) (*TransitionIssueResponse, error)
+	// CreateVersion creates a new project version (release). When dry_run is
+	// set the server returns the request body it WOULD send (in dry_run_body)
+	// without contacting Jira.
+	CreateVersion(context.Context, *CreateVersionRequest) (*CreateVersionResponse, error)
+	// UpdateVersion edits an existing project version. Honors dry_run like
+	// CreateVersion.
+	UpdateVersion(context.Context, *UpdateVersionRequest) (*UpdateVersionResponse, error)
+	// ListVersions lists the versions (releases) for a project (id or key).
+	ListVersions(context.Context, *ListVersionsRequest) (*ListVersionsResponse, error)
 	mustEmbedUnimplementedGojiraServer()
 }
 
@@ -261,6 +312,15 @@ func (UnimplementedGojiraServer) ListTransitions(context.Context, *ListTransitio
 }
 func (UnimplementedGojiraServer) TransitionIssue(context.Context, *TransitionIssueRequest) (*TransitionIssueResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TransitionIssue not implemented")
+}
+func (UnimplementedGojiraServer) CreateVersion(context.Context, *CreateVersionRequest) (*CreateVersionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateVersion not implemented")
+}
+func (UnimplementedGojiraServer) UpdateVersion(context.Context, *UpdateVersionRequest) (*UpdateVersionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateVersion not implemented")
+}
+func (UnimplementedGojiraServer) ListVersions(context.Context, *ListVersionsRequest) (*ListVersionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListVersions not implemented")
 }
 func (UnimplementedGojiraServer) mustEmbedUnimplementedGojiraServer() {}
 func (UnimplementedGojiraServer) testEmbeddedByValue()                {}
@@ -438,6 +498,60 @@ func _Gojira_TransitionIssue_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Gojira_CreateVersion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateVersionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GojiraServer).CreateVersion(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Gojira_CreateVersion_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GojiraServer).CreateVersion(ctx, req.(*CreateVersionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Gojira_UpdateVersion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateVersionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GojiraServer).UpdateVersion(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Gojira_UpdateVersion_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GojiraServer).UpdateVersion(ctx, req.(*UpdateVersionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Gojira_ListVersions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListVersionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GojiraServer).ListVersions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Gojira_ListVersions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GojiraServer).ListVersions(ctx, req.(*ListVersionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Gojira_ServiceDesc is the grpc.ServiceDesc for Gojira service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -476,6 +590,18 @@ var Gojira_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TransitionIssue",
 			Handler:    _Gojira_TransitionIssue_Handler,
+		},
+		{
+			MethodName: "CreateVersion",
+			Handler:    _Gojira_CreateVersion_Handler,
+		},
+		{
+			MethodName: "UpdateVersion",
+			Handler:    _Gojira_UpdateVersion_Handler,
+		},
+		{
+			MethodName: "ListVersions",
+			Handler:    _Gojira_ListVersions_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

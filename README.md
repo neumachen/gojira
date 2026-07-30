@@ -156,6 +156,71 @@ Unlike `crawl`, `get` never writes files to disk — it prints directly
 to stdout. It does **not** require `GOJIRA_OUTPUT_DIR`. The `--format`
 flag accepts `markdown` (default) or `json`.
 
+## Jira releases: `gojira release`
+
+The `gojira release` command group manages a Jira project's Versions —
+the entries on a project's **Releases** page. Versions are
+project-scoped: they belong to a project, not to a single issue. As with
+the rest of gojira's write surface, version **deletion is intentionally
+unsupported**. For the end-to-end cut → attach → transition workflow,
+see [docs/jira-releases.md](./docs/jira-releases.md).
+
+```sh
+# Create a version (a "Release") on a project. Identify the project by
+# key (--project, resolved to a numeric id internally) or by numeric id
+# (--project-id).
+gojira release create --project EXAMPLE --name Release-abc1234 \
+  --description "Ship it" --released --release-date 2000-01-01
+
+# Update only the fields you pass; unset flags never blank an existing
+# value.
+gojira release update 10001 --released --release-date 2000-01-01
+
+# List a project's versions (by key or id).
+gojira release list --project EXAMPLE
+```
+
+`release create` requires `--name` and exactly one of `--project` or
+`--project-id`. On success it prints `Created version <id> (<name>)`
+followed by the version's self URL on the next line; `release update`
+prints `Updated version <id>`. `release list` prints one line per
+version — `<id>\t<name>\treleased=<bool>\t<releaseDate>` — or
+`No versions for <project>` when the project has none.
+
+Both `create` and `update` accept `--dry-run`, which prints the JSON
+request body **without** any HTTP call. Because the dry-run is
+network-free, supplying only `--project <KEY>` omits `projectId` from the
+previewed body (the key is resolved to a numeric id at send time) and a
+one-line note is written to stderr; pass `--project-id <numeric>` for a
+byte-exact dry-run body.
+
+### Fix Versions on `create` / `update`
+
+The existing `gojira create` and `gojira update` commands can attach one
+or more Fix Version(s) to an issue:
+
+- `--fix-version <name>` — match a version by name (repeatable).
+- `--fix-version-id <id>` — match a version by id (repeatable).
+
+On `gojira update`, the plain `--fix-version` / `--fix-version-id` flags
+perform a **set-replace** of the issue's fix versions. To change them
+incrementally instead, use:
+
+- `--add-fix-version <id>` — add a version by id (repeatable).
+- `--remove-fix-version <id>` — remove a version by id (repeatable).
+
+```sh
+# Attach a fix version when creating an issue.
+gojira create --project EXAMPLE --type Task --summary "New task" \
+  --fix-version Release-abc1234
+
+# Set-replace the fix versions on an existing issue.
+gojira update EXAMPLE-123 --fix-version-id 10001
+
+# Incrementally add/remove a fix version by id.
+gojira update EXAMPLE-123 --add-fix-version 10001 --remove-fix-version 10000
+```
+
 ## CLI flags
 
 The `crawl` subcommand accepts these flags. Each maps to an env
@@ -189,7 +254,7 @@ flag overrides the env var when both are set.
 ## First run: `gojira init`
 
 Every Jira-touching command (`crawl`, `serve`, `create`, `update`,
-`comment`, `transitions`, `transition`) requires some form of
+`comment`, `transitions`, `transition`, `release`) requires some form of
 configuration before it will contact Jira. The simplest way to provide
 it is the `gojira init` subcommand, which scaffolds a config file with
 `0600` permissions (it contains your Jira API token).
@@ -470,7 +535,8 @@ The library facade groups its capabilities into classification
 (`Classify`), configuration (`LoadConfig` and friends), fetch/render
 (`GetIssue`, `FetchAndRender`), crawl (`Crawl`, `CrawlGraph`), and
 write operations (`CreateIssue`, `UpdateIssue`, `AddComment`,
-`ListTransitions`, `TransitionIssue`), plus type aliases for `Config`,
+`ListTransitions`, `TransitionIssue`, `CreateVersion`, `UpdateVersion`,
+`ListVersions`), plus type aliases for `Config`,
 `Summary`, `Sink`, `Event`, and the graph model
 (`GraphModel`/`GraphNode`/`GraphEdge`). All are documented in
 [`gojira.go`](./gojira.go)'s package doc.
@@ -584,6 +650,13 @@ authentication**.
 | `AddComment` | unary | Append a comment (plain text, converted to ADF server-side) to an issue. |
 | `ListTransitions` | unary | List the workflow transitions currently available for an issue (id, name, target status). |
 | `TransitionIssue` | unary | Move an issue through a transition, selected by `transition_id` or by `target_status_name` (resolved server-side via `ListTransitions`). |
+| `CreateVersion` | unary | Create a project Version (a "Release"). `dry_run` returns the request body the server would send, without creating anything. |
+| `UpdateVersion` | unary | Update fields on an existing Version; only the fields set are changed. Honors `dry_run` like `CreateVersion`. |
+| `ListVersions` | unary | List the versions defined on a project. |
+
+`CreateIssueRequest` and `UpdateIssueRequest` additionally carry
+`repeated string fix_versions` (names) and `repeated string
+fix_version_ids` (ids) for attaching Fix Version(s) to an issue.
 
 The proto contract is defined in
 [`proto/gojira/v1/gojira.proto`](./proto/gojira/v1/gojira.proto) and the
@@ -703,6 +776,7 @@ The following MCP tools are always available (read-only):
 - `crawl` — recursively crawl Jira issues from one or more start keys; returns a summary on completion (emits MCP progress notifications per fetched issue when the host supplies a progress token)
 - `get_graph` — crawl in-memory and return the discovered issue graph as `{nodes, edges}` (no files written)
 - `list_transitions` — list workflow transitions available for an issue
+- `list_versions` — list a project's versions (releases); input `{ project }`, returns `{ versions: [...] }`
 
 The mutating tools are gated behind `mcp.allow_writes: true`
 (default `false`). When `allow_writes` is false, the write tools are
@@ -713,6 +787,12 @@ operator explicitly opts in:
 - `update_issue`
 - `add_comment`
 - `transition_issue`
+- `create_version`
+- `update_version`
+
+The `create_issue` and `update_issue` tools also accept `fix_versions`
+(array of names) and `fix_version_ids` (array of ids) inputs to attach
+Fix Version(s) to an issue.
 
 ### Host configuration
 
@@ -828,6 +908,9 @@ write path and the Dev Status error branches.
 - [docs/releasing.md](./docs/releasing.md)
   — how gojira's build identity is stamped and how a maintainer
   cuts a release.
+- [docs/jira-releases.md](./docs/jira-releases.md)
+  — cutting Jira project Versions/Releases and attaching them to issues
+  as Fix Versions.
 
 ## License
 

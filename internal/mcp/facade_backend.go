@@ -87,6 +87,12 @@ func (f *facadeBackend) CreateIssue(ctx context.Context, project, issueType stri
 	if fields.ParentKey != "" {
 		opts = append(opts, client.WithParent(fields.ParentKey))
 	}
+	if len(fields.FixVersions) > 0 {
+		opts = append(opts, client.WithFixVersionNames(fields.FixVersions...))
+	}
+	if len(fields.FixVersionIDs) > 0 {
+		opts = append(opts, client.WithFixVersionIDs(fields.FixVersionIDs...))
+	}
 	for id, v := range fields.RawFields {
 		opts = append(opts, client.WithField(id, v))
 	}
@@ -106,6 +112,12 @@ func (f *facadeBackend) UpdateIssue(ctx context.Context, key string, fields Upda
 	}
 	if len(fields.Labels) > 0 {
 		opts = append(opts, client.WithLabelsUpdate(fields.Labels...))
+	}
+	if len(fields.FixVersions) > 0 {
+		opts = append(opts, client.WithFixVersionNamesUpdate(fields.FixVersions...))
+	}
+	if len(fields.FixVersionIDs) > 0 {
+		opts = append(opts, client.WithFixVersionIDsUpdate(fields.FixVersionIDs...))
 	}
 	for id, v := range fields.RawFields {
 		opts = append(opts, client.WithFieldUpdate(id, v))
@@ -142,6 +154,42 @@ func (f *facadeBackend) TransitionIssue(ctx context.Context, key, transitionID, 
 		return gojira.TransitionIssue(ctx, f.cfg, key, transitionID, opts...)
 	}
 	return gojira.TransitionIssueByStatus(ctx, f.cfg, key, toStatus, opts...)
+}
+
+// versionOptsFromFields builds the optional [client.VersionOption] set
+// from a [VersionFields]. Released/Archived are applied only when the
+// pointer is non-nil so an unset flag never blanks an existing value on
+// update; the string fields are applied only when non-empty.
+func versionOptsFromFields(fields VersionFields) []client.VersionOption {
+	opts := make([]client.VersionOption, 0, 5)
+	if fields.Description != "" {
+		opts = append(opts, client.WithVersionDescription(fields.Description))
+	}
+	if fields.Released != nil {
+		opts = append(opts, client.WithVersionReleased(*fields.Released))
+	}
+	if fields.Archived != nil {
+		opts = append(opts, client.WithVersionArchived(*fields.Archived))
+	}
+	if fields.ReleaseDate != "" {
+		opts = append(opts, client.WithVersionReleaseDate(fields.ReleaseDate))
+	}
+	if fields.StartDate != "" {
+		opts = append(opts, client.WithVersionStartDate(fields.StartDate))
+	}
+	return opts
+}
+
+func (f *facadeBackend) CreateVersion(ctx context.Context, name, project string, fields VersionFields) (client.Version, error) {
+	return gojira.CreateVersion(ctx, f.cfg, name, project, versionOptsFromFields(fields)...)
+}
+
+func (f *facadeBackend) UpdateVersion(ctx context.Context, id string, fields VersionFields) (client.Version, error) {
+	return gojira.UpdateVersion(ctx, f.cfg, id, versionOptsFromFields(fields)...)
+}
+
+func (f *facadeBackend) ListVersions(ctx context.Context, projectIDOrKey string) ([]client.Version, error) {
+	return gojira.ListVersions(ctx, f.cfg, projectIDOrKey)
 }
 
 // ---------------------------------------------------------------------------

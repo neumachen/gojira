@@ -212,6 +212,102 @@ func TestRenderUpdateBody_WithUpdateVerb_AddRemoveSet(t *testing.T) {
 	assert.Equal(t, map[string]any{"set": "renamed"}, summaryOps[0])
 }
 
+// ---------------------------------------------------------------------------
+// fixVersions — set-replace (create + update) and incremental add/remove
+// ---------------------------------------------------------------------------
+
+func TestRenderCreateBody_FixVersionIDsAndNames(t *testing.T) {
+	t.Parallel()
+
+	byID, err := client.RenderCreateBody("PROJ", "Task",
+		client.WithFixVersionIDs("10000", "10001"),
+	)
+	require.NoError(t, err)
+	f := fieldsOf(t, decodeBody(t, byID))
+	assert.Equal(t, []any{
+		map[string]any{"id": "10000"},
+		map[string]any{"id": "10001"},
+	}, f["fixVersions"], "WithFixVersionIDs")
+
+	byName, err := client.RenderCreateBody("PROJ", "Task",
+		client.WithFixVersionNames("1.0", "2.0"),
+	)
+	require.NoError(t, err)
+	f = fieldsOf(t, decodeBody(t, byName))
+	assert.Equal(t, []any{
+		map[string]any{"name": "1.0"},
+		map[string]any{"name": "2.0"},
+	}, f["fixVersions"], "WithFixVersionNames")
+}
+
+func TestRenderUpdateBody_FixVersionSetReplace(t *testing.T) {
+	t.Parallel()
+
+	byID, err := client.RenderUpdateBody(
+		client.WithFixVersionIDsUpdate("10000"),
+	)
+	require.NoError(t, err)
+	f := fieldsOf(t, decodeBody(t, byID))
+	assert.Equal(t, []any{map[string]any{"id": "10000"}}, f["fixVersions"], "WithFixVersionIDsUpdate")
+
+	byName, err := client.RenderUpdateBody(
+		client.WithFixVersionNamesUpdate("1.0"),
+	)
+	require.NoError(t, err)
+	f = fieldsOf(t, decodeBody(t, byName))
+	assert.Equal(t, []any{map[string]any{"name": "1.0"}}, f["fixVersions"], "WithFixVersionNamesUpdate")
+}
+
+func TestRenderUpdateBody_FixVersionAddRemoveVerbs(t *testing.T) {
+	t.Parallel()
+
+	body, err := client.RenderUpdateBody(
+		client.WithFixVersionAdd("10000"),
+		client.WithFixVersionRemove("10001"),
+	)
+	require.NoError(t, err)
+
+	u := updatesOf(t, decodeBody(t, body))
+	require.NotNil(t, u, `"update" must be populated`)
+
+	ops, ok := u["fixVersions"].([]any)
+	require.True(t, ok, "update.fixVersions must be a JSON array, got %T", u["fixVersions"])
+	require.Len(t, ops, 2, "add+remove order must be preserved")
+	assert.Equal(t, map[string]any{"add": map[string]any{"id": "10000"}}, ops[0])
+	assert.Equal(t, map[string]any{"remove": map[string]any{"id": "10001"}}, ops[1])
+}
+
+// TestFixVersions_SlicesCopiedDefensively proves the fixVersions options
+// copy their input slice (like opLabels), so mutating the caller's slice
+// after the option is constructed does not change the rendered body.
+func TestFixVersions_SlicesCopiedDefensively(t *testing.T) {
+	t.Parallel()
+
+	ids := []string{"10000", "10001"}
+	opt := client.WithFixVersionIDs(ids...)
+	// Mutate the caller's backing array AFTER building the option.
+	ids[0] = "MUTATED"
+
+	body, err := client.RenderCreateBody("PROJ", "Task", opt)
+	require.NoError(t, err)
+	f := fieldsOf(t, decodeBody(t, body))
+	assert.Equal(t, []any{
+		map[string]any{"id": "10000"},
+		map[string]any{"id": "10001"},
+	}, f["fixVersions"], "mutating the caller slice must not affect the rendered body")
+
+	names := []string{"1.0", "2.0"}
+	nopt := client.WithFixVersionNamesUpdate(names...)
+	names[1] = "CHANGED"
+	ub, err := client.RenderUpdateBody(nopt)
+	require.NoError(t, err)
+	uf := fieldsOf(t, decodeBody(t, ub))
+	assert.Equal(t, []any{
+		map[string]any{"name": "1.0"},
+		map[string]any{"name": "2.0"},
+	}, uf["fixVersions"], "update variant must also copy defensively")
+}
+
 // TestRenderUpdateBody_EmptyYieldsEmptyObject pins the no-options behaviour:
 // the body is {}, not {"fields":{}}, so Jira treats it as a no-op rather
 // than rejecting a malformed payload.
